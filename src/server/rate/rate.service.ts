@@ -94,6 +94,16 @@ async function fetchFromApi(): Promise<{ usdToBs: Decimal; fetchedAt: Date }> {
   }
 }
 
+/** Parsea el fallback estático; devuelve null si no es un número positivo. */
+function parseFallback(raw: string): Decimal | null {
+  try {
+    const fallback = new Decimal(String(raw));
+    return fallback.isNaN() || fallback.lte(0) ? null : fallback;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Devuelve la tasa BCV actual con la estrategia de caché híbrida y
  * fallback en cascada descrita arriba. Nunca lanza si existe alguna
@@ -154,12 +164,9 @@ export async function getBcvRate(): Promise<BcvRate> {
       return { usdToBs: cached.usdToBs, origin: "stale", fetchedAt: cached.fetchedAt };
     }
     // 5. Fallback estático configurado.
-    const fallbackRaw = env.BCV_RATE_FALLBACK;
-    if (fallbackRaw) {
-      const fallback = new Decimal(String(fallbackRaw));
-      if (!fallback.isNaN() && fallback.gt(0)) {
-        return { usdToBs: fallback, origin: "fallback" };
-      }
+    const fallback = parseFallback(env.BCV_RATE_FALLBACK);
+    if (fallback) {
+      return { usdToBs: fallback, origin: "fallback" };
     }
     // 6. Sin ninguna fuente: error controlado.
     throw new RateUnavailableError(
