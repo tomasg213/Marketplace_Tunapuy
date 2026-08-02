@@ -9,6 +9,7 @@
     "lint": "eslint",
     "db:seed": "prisma db seed",
     "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
     "test": "vitest run",
     "test:e2e": "playwright test",
     "postinstall": "prisma generate"
