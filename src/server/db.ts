@@ -1,7 +1,7 @@
 // Singleton de Prisma Client (docs/architecture.md §1.1).
 // Prisma 7 exige un driver adapter (`@prisma/adapter-pg`).
 // SOLO importable desde Server Components / Route Handlers / scripts (seed).
-import { PrismaClient } from "../../generated/prisma/client";
+import { Prisma, PrismaClient } from "../../generated/prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
@@ -16,6 +16,7 @@ function createPrismaClient(): PrismaClient {
 }
 
 export const db: PrismaClient = globalForPrisma.prisma ?? createPrismaClient();
+export { Prisma };
 
 // En dev, reutiliza la misma instancia entre recargas de Next.js (hot reload).
 if (process.env.NODE_ENV !== "production") {
