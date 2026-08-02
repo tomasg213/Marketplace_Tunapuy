@@ -15,6 +15,8 @@ export type ProductCardProduct = {
   priceBs?: Decimal.Value | null;
   phoneNumber: string;
   sellerName?: string | null;
+  /** Ruta al perfil del vendedor (persona o negocio). */
+  sellerHref?: string;
 };
 
 export function ProductCard({
@@ -78,7 +80,16 @@ export function ProductCard({
           className="w-full"
         />
         {product.sellerName && (
-          <p className="mt-2 text-xs text-muted-foreground">{product.sellerName}</p>
+          product.sellerHref ? (
+            <a
+              href={product.sellerHref}
+              className="mt-2 inline-flex min-h-8 items-center rounded-sm text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+            >
+              {product.sellerName}
+            </a>
+          ) : (
+            <p className="mt-2 text-xs text-muted-foreground">{product.sellerName}</p>
+          )
         )}
       </div>
     </Card>
