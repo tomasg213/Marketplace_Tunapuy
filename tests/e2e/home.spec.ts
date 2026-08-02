@@ -89,12 +89,11 @@ test("botón WhatsApp: enlace directo https://wa.me/ sin '+' y como <a> independ
   expect(href).toContain("text=");
 });
 
-test.fixme(
+test(
   "click en categoría filtra el catálogo (/buscar?categoria=<slug>)",
   async ({ page }) => {
-    // Ruta /buscar NO implementada en E0 (los filtros/búsqueda son la Épica E2).
-    // Hoy los chips enlazan a /buscar?categoria=... que responde 404 (bug B1).
-    // Activar este test cuando exista la ruta (E2).
+    // Ruta /buscar implementada en E1 (antes 404, bug B1). El chip enlaza a
+    // /buscar?categoria=... y la página filtra el catálogo por categoría.
     await page.goto("/");
     await page.getByRole("link", { name: "Comida", exact: true }).first().click();
     await expect(page).toHaveURL(/\/buscar\?categoria=comida/);
