@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Geist_Mono, Inter } from "next/font/google";
 import { BottomNav } from "@/components/BottomNav";
+import { SiteFooter } from "@/components/layout/SiteFooter";
+import { SiteHeader } from "@/components/layout/SiteHeader";
 import "./globals.css";
 
 const inter = Inter({
@@ -40,7 +42,9 @@ export default function RootLayout({
         >
           Saltar al contenido
         </a>
-        {children}
+        <SiteHeader />
+        <div className="flex-1">{children}</div>
+        <SiteFooter />
         <BottomNav />
       </body>
     </html>

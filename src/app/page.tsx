@@ -1,15 +1,19 @@
-// Home (/): buscador → chips categorías → destacados → recientes → footer con tasa BCV.
+// Home (/): buscador → chips categorías → destacados → recientes.
 // Server Component: calcula el precio en Bs con la tasa BCV cacheada
 // (docs/architecture.md §3.3) y envía al cliente strings ya formateados.
+// El footer con la tasa BCV y enlaces vive en el layout (SiteFooter, ≥lg).
 import type { Metadata } from "next";
 import { ArrowRight, Search } from "lucide-react";
 import { CategoryChips } from "@/components/CategoryChips";
-import { ProductCard, type ProductCardProduct } from "@/components/product/ProductCard";
+import { ProductCard } from "@/components/product/ProductCard";
 import { Input } from "@/components/ui/input";
 import { PRODUCTS_PER_HOME } from "@/lib/constants";
-import { formatBs } from "@/lib/format";
-import { db, Prisma } from "@/server/db";
-import { usdToBs } from "@/server/rate/convert";
+import { db } from "@/server/db";
+import {
+  cardIncludes,
+  toCardProduct,
+  type CardProduct,
+} from "@/server/products/queries";
 import { getBcvRate, type BcvRate } from "@/server/rate/rate.service";
 
 // La home lee la tasa BCV y la BD en cada request (no prerenderizar).
@@ -20,36 +24,6 @@ export const metadata: Metadata = {
   description:
     "Descubre productos y negocios locales: comida, ropa, zapatos, perfume, automotriz y licor.",
 };
-
-const productIncludes = {
-  category: true,
-  images: { take: 1, orderBy: { position: "asc" as const } },
-  business: { select: { name: true } },
-  seller: { select: { name: true } },
-} as const;
-
-type HomeProduct = Prisma.ProductGetPayload<{ include: typeof productIncludes }>;
-
-function toCardProduct(product: HomeProduct, rate: BcvRate | null): ProductCardProduct {
-  const offerUsd =
-    product.offerPriceUsd && product.offerPriceUsd.lessThan(product.priceUsd)
-      ? product.offerPriceUsd
-      : null;
-  const effectiveUsd = offerUsd ?? product.priceUsd;
-  const priceBs = rate ? usdToBs(effectiveUsd, rate.usdToBs) : null;
-
-  return {
-    slug: product.slug,
-    title: product.title,
-    imageUrl: product.images[0]?.url ?? "/placeholder.svg",
-    imageAlt: product.images[0]?.alt ?? product.title,
-    priceUsd: product.priceUsd,
-    offerPriceUsd: offerUsd,
-    priceBs,
-    phoneNumber: product.phoneNumber,
-    sellerName: product.business?.name ?? product.seller?.name,
-  };
-}
 
 export default async function HomePage() {
   let rate: BcvRate | null = null;
@@ -64,13 +38,13 @@ export default async function HomePage() {
     db.product.findMany({
       where: { status: "ACTIVE", isFeatured: true },
       orderBy: { featuredOrder: "asc" },
-      include: productIncludes,
+      include: cardIncludes,
     }),
     db.product.findMany({
       where: { status: "ACTIVE", isFeatured: false },
       orderBy: { publishedAt: "desc" },
       take: PRODUCTS_PER_HOME,
-      include: productIncludes,
+      include: cardIncludes,
     }),
   ]);
 
@@ -124,7 +98,7 @@ export default async function HomePage() {
             Destacados
           </h2>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-            {featured.map((product) => (
+            {featured.map((product: CardProduct) => (
               <ProductCard key={product.id} product={toCardProduct(product, rate)} />
             ))}
           </div>
@@ -136,31 +110,11 @@ export default async function HomePage() {
           Productos recientes
         </h2>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-          {recent.map((product) => (
+          {recent.map((product: CardProduct) => (
             <ProductCard key={product.id} product={toCardProduct(product, rate)} />
           ))}
         </div>
       </section>
-
-      <footer className="mt-12 border-t border-border pt-6">
-        <p data-testid="rate-info" className="text-sm text-muted-foreground">
-          {rate ? (
-            <>
-              Tasa BCV del día:{" "}
-              <span className="font-semibold text-foreground tabular-nums">
-                {formatBs(rate.usdToBs)}
-              </span>{" "}
-              por US$ 1,00{" "}
-              <span className="text-xs">(origen: {rate.origin})</span>
-            </>
-          ) : (
-            "Tasa BCV no disponible."
-          )}
-        </p>
-        <p className="mt-2 text-xs text-muted-foreground">
-          © {new Date().getFullYear()} Tunapuy · Vitrina de productos locales.
-        </p>
-      </footer>
     </main>
   );
 }
