@@ -20,6 +20,14 @@ describe("generateOtpCode", () => {
   it("genera códigos distintos (alta probabilidad)", () => {
     expect(generateOtpCode()).not.toBe(generateOtpCode());
   });
+
+  it("respeta una longitud custom (sin sesgo de módulo)", () => {
+    for (const len of [4, 6, 8]) {
+      const code = generateOtpCode(len);
+      expect(code).toHaveLength(len);
+      expect(code).toMatch(new RegExp(`^\\d{${len}}$`));
+    }
+  });
 });
 
 describe("isValidOtpFormat", () => {
@@ -57,6 +65,43 @@ describe("hashOtpCode / verifyOtpCode", () => {
 
   it("no verifica hashes mal formados", () => {
     expect(verifyOtpCode("123456", "sin-salt")).toBe(false);
+  });
+
+  it("verificación timing-safe: rechaza sin lanzar, incluso con largo distinto", () => {
+    const hash = hashOtpCode("123456");
+    // Distinto largo → devuelve false sin excepción (short-circuit antes del hash).
+    expect(verifyOtpCode("1", hash)).toBe(false);
+    expect(verifyOtpCode("", hash)).toBe(false);
+    // Hash mal formado (sin ':' o hex inválido) → false, nunca throw.
+    expect(verifyOtpCode("123456", "abcdef")).toBe(false);
+    expect(verifyOtpCode("123456", `${"a".repeat(32)}:zz`)).toBe(false);
+  });
+
+  it("roundtrip completo: hash → verify OK y hash ≠ código plano", () => {
+    const code = generateOtpCode();
+    const hash = hashOtpCode(code);
+    expect(hash).not.toContain(code);
+    expect(verifyOtpCode(code, hash)).toBe(true);
+  });
+});
+
+describe("consumo único (semántica del flujo)", () => {
+  it("verifyOtpCode es pura y determinista: no consume ni invalida por sí misma", () => {
+    const hash = hashOtpCode("123456");
+    // La misma verificación se puede repetir: el "consumo único" NO está en la
+    // función de utilidad, sino en el flujo (OtpCode.consumedAt), aún no
+    // implementado en E0 → pendiente de cubrir en E1 (riesgo R1).
+    expect(verifyOtpCode("123456", hash)).toBe(true);
+    expect(verifyOtpCode("123456", hash)).toBe(true);
+  });
+
+  it("intentos fallidos no mutan el hash almacenado", () => {
+    const hash = hashOtpCode("123456");
+    expect(verifyOtpCode("000000", hash)).toBe(false);
+    expect(verifyOtpCode("000000", hash)).toBe(false);
+    // El código correcto sigue verificando: el límite de intentos también es
+    // responsabilidad del flujo (contador `attempts`), no de la utilidad.
+    expect(verifyOtpCode("123456", hash)).toBe(true);
   });
 });
 
