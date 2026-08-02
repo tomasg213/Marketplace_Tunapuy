@@ -1,0 +1,158 @@
+// prisma/schema.prisma
+// Esquema canónico del Marketplace_Tunapuy (Épica E0).
+// Proveedor: PostgreSQL en TODOS los entornos (dev y prod) — decisión E0.
+//
+// Ajustes de auth OTP confirmados por el PM (vs. docs/architecture.md v1):
+//   - User.phoneNumber: String @unique  → identificador de login (obligatorio).
+//   - User.email:       String? @unique → opcional, no requerido.
+//   - Se elimina User.passwordHash (ya no hay contraseña; login por OTP).
+//   - Nuevo modelo OtpCode (código NUNCA en texto plano: solo codeHash).
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Tasa BCV (caché persistente)
+// ---------------------------------------------------------------------------
+
+model RateCache {
+  id        String   @id @default(cuid())
+  source    String   @unique // "dolarapi-oficial"
+  usdToBs   Decimal  @db.Decimal(14, 4) // tasa promedio BCV (p.ej. 746.6297)
+  fetchedAt DateTime // momento real del fetch (fechaActualizacion de la API)
+  expiresAt DateTime // fetchedAt + TTL (renovación)
+  updatedAt DateTime @updatedAt
+
+  @@index([expiresAt])
+}
+
+// ---------------------------------------------------------------------------
+// Catálogo
+// ---------------------------------------------------------------------------
+
+model Category {
+  id          String    @id @default(cuid())
+  slug        String    @unique // comida | ropa | zapatos | perfume | automotriz | licor
+  name        String // "Comida", "Ropa", ...
+  description String?
+  icon        String? // nombre del ícono (lucide-react)
+  position    Int       @default(0) // orden de aparición en la home
+  createdAt   DateTime  @default(now())
+  products    Product[]
+
+  @@index([position])
+}
+
+// ---------------------------------------------------------------------------
+// Usuarios y vendedores
+// ---------------------------------------------------------------------------
+
+model User {
+  id          String     @id @default(cuid())
+  email       String?    @unique // opcional (cambio OTP)
+  phoneNumber String     @unique // E.164, identificador de login (cambio OTP)
+  name        String
+  avatarUrl   String?
+  role        String     @default("BUYER") // BUYER | SELLER | ADMIN (constantes TS)
+  business    Business?
+  products    Product[]  @relation("SellerProducts")
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@index([role])
+}
+
+model Business {
+  id          String    @id @default(cuid())
+  slug        String    @unique
+  name        String
+  description String?
+  logoUrl     String?
+  phoneNumber String? // E.164, contacto WhatsApp del negocio
+  ownerId     String    @unique
+  owner       User      @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  products    Product[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([ownerId])
+}
+
+// ---------------------------------------------------------------------------
+// Auth OTP por teléfono (cambio E0)
+// ---------------------------------------------------------------------------
+// Un registro por intento de envío. El código en texto plano NUNCA se guarda:
+// solo `codeHash` (sha256 + salt por código). `attempts` cuenta los intentos de
+// verificación; al superar `OTP_MAX_ATTEMPTS` el código se invalida.
+// `consumedAt` marca el código como usado (login/registro completado).
+
+model OtpCode {
+  id          String    @id @default(cuid())
+  phoneNumber String // E.164 del teléfono que solicita el código
+  codeHash    String // sha256(salt + codigo), con salt por código
+  type        String // LOGIN | REGISTER (constantes TS)
+  expiresAt   DateTime // createdAt + OTP_TTL_MINUTES
+  attempts    Int       @default(0) // intentos de verificación fallidos
+  consumedAt  DateTime? // momento de uso; null mientras esté pendiente
+  createdAt   DateTime  @default(now())
+
+  // Búsqueda del último código pendiente por teléfono + tipo
+  @@index([phoneNumber, type, createdAt(sort: Desc)])
+  // Limpieza periódica de códigos vencidos
+  @@index([expiresAt])
+}
+
+// ---------------------------------------------------------------------------
+// Productos
+// ---------------------------------------------------------------------------
+
+model Product {
+  id            String         @id @default(cuid())
+  slug          String         @unique
+  title         String
+  description   String?
+  priceUsd      Decimal        @db.Decimal(10, 2) // precio principal (divisas), requerido
+  offerPriceUsd Decimal?       @db.Decimal(10, 2) // precio de oferta en divisas (opcional)
+  phoneNumber   String // E.164 del anuncio; botón WhatsApp wa.me/<número sin '+'>
+  status        String         @default("ACTIVE") // DRAFT | ACTIVE | PAUSED | ARCHIVED
+  isFeatured    Boolean        @default(false) // destacado en la home
+  featuredOrder Int            @default(0) // 0 = primera posición
+  publishedAt   DateTime? // fecha de publicación; null mientras sea borrador ("recientes")
+  categoryId    String
+  category      Category       @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  sellerId      String // dueño de la cuenta (siempre presente)
+  seller        User           @relation("SellerProducts", fields: [sellerId], references: [id], onDelete: Cascade)
+  businessId    String? // si se publica bajo un negocio
+  business      Business?      @relation(fields: [businessId], references: [id], onDelete: SetNull)
+  images        ProductImage[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  // "recientes"
+  @@index([status, publishedAt(sort: Desc)])
+  // "destacados"
+  @@index([isFeatured, featuredOrder])
+  // navegación por categoría y por vendedor
+  @@index([categoryId, status])
+  @@index([sellerId])
+  @@index([businessId])
+}
+
+model ProductImage {
+  id        String   @id @default(cuid())
+  url       String
+  key       String   @unique // object key (S3) / public_id (Cloudinary) para delete()
+  alt       String?
+  position  Int      @default(0)
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@index([productId, position])
+}

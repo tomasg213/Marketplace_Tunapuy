@@ -1,0 +1,34 @@
+# Desarrollo local: PostgreSQL 16 para todos los entornos (dev y prod).
+# Levantar con: docker compose up -d
+#
+# Credenciales de dev (nunca usar en producción):
+#   host: localhost
+#   port: 5432
+#   user: postgres
+#   password: postgres
+#   database: tunapuy
+#
+# DATABASE_URL de dev:
+#   postgresql://postgres:postgres@localhost:5432/tunapuy
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: tunapuy-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: tunapuy
+    ports:
+      - "5432:5432"
+    volumes:
+      - tunapuy_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d tunapuy"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  tunapuy_pgdata:
