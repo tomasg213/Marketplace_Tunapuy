@@ -13,6 +13,16 @@ describe("formatUsd", () => {
   it("acepta strings y Decimal", () => {
     expect(formatUsd("25.00")).toBe("$25.00");
   });
+
+  it("formatea 0 → $0.00", () => {
+    expect(formatUsd(0)).toBe("$0.00");
+    expect(formatUsd("0")).toBe("$0.00");
+  });
+
+  it("formatea montos grandes con miles y 2 decimales", () => {
+    expect(formatUsd(123456789.99)).toBe("$123,456,789.99");
+    expect(formatUsd(999999999.999)).toBe("$1,000,000,000.00");
+  });
 });
 
 describe("formatBs", () => {
@@ -26,6 +36,16 @@ describe("formatBs", () => {
 
   it("redondea a 2 decimales al formatear", () => {
     expect(formatBs(10.999)).toBe("Bs. 11,00");
+  });
+
+  it("formatea 0 → Bs. 0,00", () => {
+    expect(formatBs(0)).toBe("Bs. 0,00");
+  });
+
+  it("formatea montos grandes con punto en miles y coma en decimales", () => {
+    expect(formatBs(123456789.99)).toBe("Bs. 123.456.789,99");
+    // 1 Bs = 1,000,000 → es-VE agrupa en miles
+    expect(formatBs(1000000)).toBe("Bs. 1.000.000,00");
   });
 });
 
