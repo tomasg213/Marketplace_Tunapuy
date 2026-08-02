@@ -1,5 +1,14 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Marketplace_Tunapuy
+
+Vitrina de productos locales (Next.js App Router + TypeScript + Prisma +
+PostgreSQL). Documentación relevante:
+
+- `docs/architecture.md` — arquitectura técnica (modelo de datos, tasa BCV, auth OTP, mock vs real).
+- `docs/deployment.md` — CI/CD, estrategia por rama, hosting y mapa de variables por entorno.
+- `docs/monitoring.md` — observabilidad mínima (health, logs, alertas de la tasa BCV).
+
 ## Getting Started
 
 First, run the development server:
