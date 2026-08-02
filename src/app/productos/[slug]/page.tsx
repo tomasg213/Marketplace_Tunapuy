@@ -193,7 +193,7 @@ export default async function ProductDetailPage({ params }: { params: Params }) 
       <div
         role="region"
         aria-label="Contacto del anuncio"
-        className="fixed inset-x-0 bottom-16 z-40 border-t border-border bg-card/95 py-3 backdrop-blur supports-[backdrop-filter]:bg-card/80 lg:bottom-0 lg:pb-[env(safe-area-inset-bottom)]"
+        className="fixed inset-x-0 bottom-[calc(6rem+env(safe-area-inset-bottom))] z-40 border-t border-border bg-card/95 py-3 backdrop-blur supports-[backdrop-filter]:bg-card/80 lg:bottom-0 lg:pb-[env(safe-area-inset-bottom)]"
       >
         <div className="mx-auto flex w-full max-w-5xl items-center gap-4 px-4">
           <div className="hidden shrink-0 lg:block">
