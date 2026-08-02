@@ -6,6 +6,7 @@ import { ArrowRight, Search } from "lucide-react";
 import { CategoryChips } from "@/components/CategoryChips";
 import { ProductCard } from "@/components/product/ProductCard";
 import { Input } from "@/components/ui/input";
+import { escapeLikeWildcards, toSingleSearchParam } from "@/lib/search";
 import { db, Prisma } from "@/server/db";
 import { cardIncludes, toCardProduct } from "@/server/products/queries";
 import { getBcvRate, type BcvRate } from "@/server/rate/rate.service";
@@ -17,12 +18,14 @@ export const metadata: Metadata = {
   description: "Busca productos y negocios del catálogo de Tunapuy.",
 };
 
-type SearchParams = Promise<{ q?: string; categoria?: string }>;
+// Next.js entrega string | string[] cuando el parámetro se repite (?q=a&q=b):
+// normalizamos a un único string para no tirar 500 (bug E1).
+type SearchParams = Promise<{ q?: string | string[]; categoria?: string | string[] }>;
 
 export default async function BuscarPage({ searchParams }: { searchParams: SearchParams }) {
   const { q: rawQ, categoria: rawCategoria } = await searchParams;
-  const q = rawQ?.trim() ?? "";
-  const categoria = rawCategoria?.trim() ?? "";
+  const q = toSingleSearchParam(rawQ)?.trim() ?? "";
+  const categoria = toSingleSearchParam(rawCategoria)?.trim() ?? "";
 
   let rate: BcvRate | null = null;
   try {
@@ -37,8 +40,10 @@ export default async function BuscarPage({ searchParams }: { searchParams: Searc
     ...(q
       ? {
           OR: [
-            { title: { contains: q, mode: "insensitive" } },
-            { description: { contains: q, mode: "insensitive" } },
+            // Escapamos % y _ para que no actúen como comodines de ILIKE
+            // (buscar "%" o "_" no debe devolver todo el catálogo).
+            { title: { contains: escapeLikeWildcards(q), mode: "insensitive" } },
+            { description: { contains: escapeLikeWildcards(q), mode: "insensitive" } },
           ],
         }
       : {}),
