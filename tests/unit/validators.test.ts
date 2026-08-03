@@ -1,8 +1,9 @@
 // Pruebas de los validadores de productos (src/server/products/validators.ts).
-// Reglas (roadmap E1): priceUsd > 0, offerPriceUsd opcional < priceUsd,
-// phoneNumber E.164, categorySlug ∈ 6 categorías, slug kebab-case.
+// Reglas (roadmap E1 + épica E3): priceUsd > 0, offerPriceUsd opcional < priceUsd,
+// phoneNumber E.164, categorySlugs ∈ 13 categorías (1–3 por producto), slug kebab-case.
 
 import { describe, expect, it } from "vitest";
+import { CATEGORIES } from "../../src/lib/constants";
 import {
   categorySlugSchema,
   createProductSchema,
@@ -34,11 +35,12 @@ describe("priceUsdSchema", () => {
   });
 });
 
-describe("e164PhoneSchema", () => {
-  it("acepta teléfonos E.164 con '+': +58412…, mock +58 000…", () => {
+describe("e164PhoneSchema (R6: solo teléfonos venezolanos)", () => {
+  it("acepta E.164 venezolanos: +58412…, mocks +58 000… y formato local 0412…", () => {
     expect(e164PhoneSchema.parse("+584120000000")).toBe("+584120000000");
     expect(e164PhoneSchema.parse("+580000000001")).toBe("+580000000001");
-    expect(e164PhoneSchema.parse("+123456789")).toBe("+123456789");
+    // El formato local 0412… se normaliza a +58412… (R6).
+    expect(e164PhoneSchema.parse("04121234567")).toBe("+584121234567");
   });
 
   it("rechaza sin '+', con letras, muy corto o muy largo", () => {
@@ -49,20 +51,22 @@ describe("e164PhoneSchema", () => {
     expect(() => e164PhoneSchema.parse("")).toThrow();
   });
 
-  it("rechaza prefijos de país inválidos (código 0)", () => {
+  it("R6: rechaza prefijos de país que NO son Venezuela (+1, +34, +0…)", () => {
+    expect(() => e164PhoneSchema.parse("+12345678901")).toThrow();
+    expect(() => e164PhoneSchema.parse("+34123456789")).toThrow();
     expect(() => e164PhoneSchema.parse("+0123456789")).toThrow();
   });
 });
 
 describe("categorySlugSchema", () => {
-  it("acepta las 6 categorías fijas", () => {
-    for (const slug of ["comida", "ropa", "zapatos", "perfume", "automotriz", "licor"]) {
-      expect(categorySlugSchema.parse(slug)).toBe(slug);
+  it("acepta las 13 categorías fijas", () => {
+    for (const cat of CATEGORIES) {
+      expect(categorySlugSchema.parse(cat.slug)).toBe(cat.slug);
     }
   });
 
   it("rechaza slugs desconocidos o vacíos", () => {
-    expect(() => categorySlugSchema.parse("tecnologia")).toThrow();
+    expect(() => categorySlugSchema.parse("nope")).toThrow();
     expect(() => categorySlugSchema.parse("")).toThrow();
   });
 });
@@ -82,8 +86,8 @@ describe("productSlugSchema", () => {
 });
 
 describe("productStatusSchema", () => {
-  it("acepta los 4 estados definidos", () => {
-    for (const s of ["DRAFT", "ACTIVE", "PAUSED", "ARCHIVED"]) {
+  it("acepta los 5 estados definidos", () => {
+    for (const s of ["DRAFT", "ACTIVE", "PAUSED", "ARCHIVED", "SOLD"]) {
       expect(productStatusSchema.parse(s)).toBe(s);
     }
   });
@@ -98,7 +102,7 @@ describe("createProductSchema (priceUsd + offerPriceUsd)", () => {
   const base = {
     slug: "camisa-lino",
     title: "Camisa de lino azul",
-    categorySlug: "ropa",
+    categorySlugs: ["ropa"],
     priceUsd: "25.00",
     phoneNumber: "+584120000000",
   };
@@ -129,16 +133,28 @@ describe("createProductSchema (priceUsd + offerPriceUsd)", () => {
     expect(() => createProductSchema.parse({ ...base, offerPriceUsd: "abc" })).toThrow();
   });
 
-  it("rechaza categoría fuera de las 6 fijas", () => {
-    expect(() => createProductSchema.parse({ ...base, categorySlug: "nope" })).toThrow();
+  it("rechaza categoría fuera de las 13 fijas", () => {
+    expect(() => createProductSchema.parse({ ...base, categorySlugs: ["nope"] })).toThrow();
+  });
+
+  it("E3: exige 1–3 categorías (vacío y 4 rechazados)", () => {
+    expect(() => createProductSchema.parse({ ...base, categorySlugs: [] })).toThrow(
+      /al menos una/,
+    );
+    expect(() =>
+      createProductSchema.parse({
+        ...base,
+        categorySlugs: ["comida", "ropa", "zapatos", "perfume"],
+      }),
+    ).toThrow(/Máximo 3/);
   });
 
   it("rechaza teléfono sin '+'" , () => {
     expect(() => createProductSchema.parse({ ...base, phoneNumber: "584120000000" })).toThrow();
   });
 
-  it("asigna status ACTIVE por defecto y acepta DRAFT explícito", () => {
-    expect(createProductSchema.parse(base).status).toBe("ACTIVE");
-    expect(createProductSchema.parse({ ...base, status: "DRAFT" }).status).toBe("DRAFT");
+  it("R10: asigna status DRAFT por defecto (nunca ACTIVE por omisión)", () => {
+    expect(createProductSchema.parse(base).status).toBe("DRAFT");
+    expect(createProductSchema.parse({ ...base, status: "ACTIVE" }).status).toBe("ACTIVE");
   });
 });

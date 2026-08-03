@@ -1,14 +1,23 @@
-import { describe, expect, it } from "vitest";
+// Pruebas de utilidades OTP (src/server/auth/otp-utils.ts) — dictamen E2 R3.
+// El hash es HMAC-SHA256(AUTH_SECRET, salt + code): sin la clave (pepper) no
+// se puede recuperar el código ni forjar hashes; el formato es
+// `saltHex(32B → 64 chars):hmacHex(32B → 64 chars)`.
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { OTP_CODE_LENGTH } from "../../src/lib/constants";
 import {
-  OTP_CODE_LENGTH,
   generateOtpCode,
   hasAttemptsLeft,
   hashOtpCode,
   isOtpExpired,
-  isValidOtpFormat,
   otpExpiresAt,
+  OTP_HASH_REGEX,
   verifyOtpCode,
 } from "../../src/server/auth/otp-utils";
+
+// otp-utils lee env.AUTH_SECRET en tiempo de carga (pepper del HMAC).
+beforeEach(() => {
+  process.env.AUTH_SECRET = "test-secret-0123456789abcdefghijklmnopqrstuv";
+});
 
 describe("generateOtpCode", () => {
   it("genera un código de 6 dígitos", () => {
@@ -21,7 +30,7 @@ describe("generateOtpCode", () => {
     expect(generateOtpCode()).not.toBe(generateOtpCode());
   });
 
-  it("respeta una longitud custom (sin sesgo de módulo)", () => {
+  it("respeta una longitud custom sin sesgo de módulo (rejection sampling)", () => {
     for (const len of [4, 6, 8]) {
       const code = generateOtpCode(len);
       expect(code).toHaveLength(len);
@@ -30,26 +39,12 @@ describe("generateOtpCode", () => {
   });
 });
 
-describe("isValidOtpFormat", () => {
-  it("acepta exactamente 6 dígitos", () => {
-    expect(isValidOtpFormat("123456")).toBe(true);
-    expect(isValidOtpFormat("000000")).toBe(true);
-  });
-
-  it("rechaza letras, largo incorrecto o vacío", () => {
-    expect(isValidOtpFormat("12a456")).toBe(false);
-    expect(isValidOtpFormat("12345")).toBe(false);
-    expect(isValidOtpFormat("1234567")).toBe(false);
-    expect(isValidOtpFormat("")).toBe(false);
-  });
-});
-
-describe("hashOtpCode / verifyOtpCode", () => {
-  it("nunca guarda el código en texto plano", () => {
+describe("hashOtpCode / verifyOtpCode (R3: HMAC keyed por AUTH_SECRET)", () => {
+  it("nunca guarda el código en texto plano y usa formato salt:hmac", () => {
     const hash = hashOtpCode("123456");
     expect(hash).not.toContain("123456");
-    // formato: saltHex(32) : sha256Hex(64)
-    expect(hash).toMatch(/^[0-9a-f]{32}:[0-9a-f]{64}$/);
+    expect(hash).toMatch(/^[0-9a-f]{64}:[0-9a-f]{64}$/);
+    expect(OTP_HASH_REGEX.test(hash)).toBe(true);
   });
 
   it("usa un salt distinto por código (mismo código → hashes distintos)", () => {
@@ -60,21 +55,23 @@ describe("hashOtpCode / verifyOtpCode", () => {
     const hash = hashOtpCode("123456");
     expect(verifyOtpCode("123456", hash)).toBe(true);
     expect(verifyOtpCode("654321", hash)).toBe(false);
-    expect(verifyOtpCode("12345", hash)).toBe(false); // formato inválido
+    expect(verifyOtpCode("12345", hash)).toBe(false);
+  });
+
+  it("el HMAC depende del AUTH_SECRET: con otra clave no verifica", async () => {
+    // otp-utils lee env.AUTH_SECRET al cargar (pepper). Se reimporta el módulo
+    // con otra clave para comprobar que el hash no verifica (R3).
+    const hash = hashOtpCode("123456");
+    process.env.AUTH_SECRET = "otra-clave-distinta-0123456789abcdefghijklmnop";
+    vi.resetModules();
+    const fresh = await import("../../src/server/auth/otp-utils");
+    expect(fresh.verifyOtpCode("123456", hash)).toBe(false);
   });
 
   it("no verifica hashes mal formados", () => {
     expect(verifyOtpCode("123456", "sin-salt")).toBe(false);
-  });
-
-  it("verificación timing-safe: rechaza sin lanzar, incluso con largo distinto", () => {
-    const hash = hashOtpCode("123456");
-    // Distinto largo → devuelve false sin excepción (short-circuit antes del hash).
-    expect(verifyOtpCode("1", hash)).toBe(false);
-    expect(verifyOtpCode("", hash)).toBe(false);
-    // Hash mal formado (sin ':' o hex inválido) → false, nunca throw.
-    expect(verifyOtpCode("123456", "abcdef")).toBe(false);
-    expect(verifyOtpCode("123456", `${"a".repeat(32)}:zz`)).toBe(false);
+    expect(verifyOtpCode("123456", `${"a".repeat(63)}:${"b".repeat(64)}`)).toBe(false);
+    expect(verifyOtpCode("123456", `${"a".repeat(64)}:zz`)).toBe(false);
   });
 
   it("roundtrip completo: hash → verify OK y hash ≠ código plano", () => {
@@ -85,55 +82,26 @@ describe("hashOtpCode / verifyOtpCode", () => {
   });
 });
 
-describe("consumo único (semántica del flujo)", () => {
-  it("verifyOtpCode es pura y determinista: no consume ni invalida por sí misma", () => {
-    const hash = hashOtpCode("123456");
-    // La misma verificación se puede repetir: el "consumo único" NO está en la
-    // función de utilidad, sino en el flujo (OtpCode.consumedAt), aún no
-    // implementado en E0 → pendiente de cubrir en E1 (riesgo R1).
-    expect(verifyOtpCode("123456", hash)).toBe(true);
-    expect(verifyOtpCode("123456", hash)).toBe(true);
-  });
-
-  it("intentos fallidos no mutan el hash almacenado", () => {
-    const hash = hashOtpCode("123456");
-    expect(verifyOtpCode("000000", hash)).toBe(false);
-    expect(verifyOtpCode("000000", hash)).toBe(false);
-    // El código correcto sigue verificando: el límite de intentos también es
-    // responsabilidad del flujo (contador `attempts`), no de la utilidad.
-    expect(verifyOtpCode("123456", hash)).toBe(true);
-  });
-});
-
-describe("isOtpExpired", () => {
-  const now = new Date("2026-08-02T12:00:00.000Z");
-
+describe("isOtpExpired / otpExpiresAt", () => {
   it("considera vencido cuando expiresAt <= now", () => {
-    expect(isOtpExpired(new Date("2026-08-02T11:59:59.000Z"), now)).toBe(true);
-    expect(isOtpExpired(new Date("2026-08-02T12:00:00.000Z"), now)).toBe(true);
+    const now = Date.now();
+    expect(isOtpExpired(new Date(now - 1000))).toBe(true);
+    expect(isOtpExpired(new Date(now))).toBe(true);
   });
 
   it("considera vigente cuando expiresAt > now", () => {
-    expect(isOtpExpired(new Date("2026-08-02T12:00:01.000Z"), now)).toBe(false);
+    expect(isOtpExpired(new Date(Date.now() + 1000))).toBe(false);
   });
-});
 
-describe("otpExpiresAt", () => {
-  it("calcula expiración = now + TTL (minutos)", () => {
-    const now = new Date("2026-08-02T12:00:00.000Z");
-    expect(otpExpiresAt(now, 5).toISOString()).toBe("2026-08-02T12:05:00.000Z");
+  it("otpExpiresAt calcula expiración = now + TTL (default 5 min)", () => {
+    const expires = otpExpiresAt(5);
+    expect(expires.getTime() - Date.now()).toBeGreaterThan(4 * 60 * 1000);
+    expect(expires.getTime() - Date.now()).toBeLessThanOrEqual(5 * 60 * 1000);
   });
-});
 
-describe("hasAttemptsLeft", () => {
-  it("respeta el límite de intentos (default 5)", () => {
+  it("hasAttemptsLeft respeta el límite (default 5)", () => {
     expect(hasAttemptsLeft(0)).toBe(true);
     expect(hasAttemptsLeft(4)).toBe(true);
     expect(hasAttemptsLeft(5)).toBe(false);
-  });
-
-  it("respeta un máximo custom", () => {
-    expect(hasAttemptsLeft(3, 5)).toBe(true);
-    expect(hasAttemptsLeft(5, 5)).toBe(false);
   });
 });

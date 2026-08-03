@@ -4,7 +4,7 @@
 //   - priceUsd > 0 (columna Decimal(10,2)).
 //   - offerPriceUsd opcional y SIEMPRE menor que priceUsd.
 //   - phoneNumber en E.164 (+58...) para el botón WhatsApp (D8).
-//   - categorySlug ∈ las 6 categorías fijas (D2).
+//   - categorySlugs ∈ las 13 categorías fijas, 1–3 por producto (D2 + épica E3).
 //   - status ∈ PRODUCT_STATUS (D11: String + unión TS, validado con zod en el borde).
 //
 // Nota: el módulo se creó como base para E1 (publicaciones del vendedor). En E0
@@ -12,21 +12,29 @@
 // tests/unit/validators.test.ts.
 import { z } from "zod";
 import { CATEGORIES, PRODUCT_STATUS, type CategorySlug, type ProductStatus } from "@/lib/constants";
+import { e164PhoneSchema } from "@/server/validators";
 
-/** Slug de categoría: una de las 6 fijas (comida, ropa, zapatos, perfume, automotriz, licor). */
+// Re-export para compatibilidad (tests/unit/validators.test.ts importa desde aquí).
+export { e164PhoneSchema } from "@/server/validators";
+
+/** Slug de categoría: una de las 13 fijas (comida … ferreteria). */
 export const categorySlugSchema = z.enum(
   CATEGORIES.map((c) => c.slug) as [CategorySlug, ...CategorySlug[]],
 );
 
-/** Estado de publicación del producto (DRAFT | ACTIVE | PAUSED | ARCHIVED). */
+/**
+ * Categorías de un producto (épica E3): 1–3 slugs.
+ * El orden del array define la `position` (índice 0 = categoría principal).
+ */
+export const categorySlugsSchema = z
+  .array(categorySlugSchema)
+  .min(1, "Elige al menos una categoría")
+  .max(3, "Máximo 3 categorías");
+
+/** Estado de publicación del producto (DRAFT | ACTIVE | PAUSED | ARCHIVED | SOLD). */
 export const productStatusSchema = z.enum(
   Object.values(PRODUCT_STATUS) as [ProductStatus, ...ProductStatus[]],
 );
-
-/** Teléfono en E.164 (ITU-T): `+` + 7–15 dígitos, p. ej. "+584120000000". */
-export const e164PhoneSchema = z
-  .string()
-  .regex(/^\+[1-9]\d{6,14}$/, "Teléfono inválido: debe ser E.164 (ej. +584120000000)");
 
 /** Precio regular en USD: obligatorio, numérico y > 0, dentro de Decimal(10,2). */
 export const priceUsdSchema = z.coerce
@@ -60,11 +68,13 @@ export const createProductSchema = z
       .trim()
       .max(2_000, "La descripción no puede superar 2000 caracteres")
       .optional(),
-    categorySlug: categorySlugSchema,
+    categorySlugs: categorySlugsSchema,
     priceUsd: priceUsdSchema,
     offerPriceUsd: offerPriceUsdSchema,
     phoneNumber: e164PhoneSchema,
-    status: productStatusSchema.default("ACTIVE"),
+    // R10: los productos NUEVOS se crean como borrador (DRAFT); solo se publican
+    // (ACTIVE + publishedAt) explícitamente, nunca por omisión.
+    status: productStatusSchema.default("DRAFT"),
   })
   .superRefine((data, ctx) => {
     if (data.offerPriceUsd != null && !(data.offerPriceUsd < data.priceUsd)) {

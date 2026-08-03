@@ -1,4 +1,4 @@
-// /productos/[slug] — Detalle de producto (Épica E1).
+// /productos/[slug] — Detalle de producto (Épica E1 + Categorías multi).
 // Server Component force-dynamic: la tasa BCV es dinámica; el Bs. se
 // calcula SIEMPRE server-side (docs/architecture.md §3.3).
 import type { Metadata } from "next";
@@ -18,8 +18,8 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 import { Card } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 import { formatBs, formatUsd } from "@/lib/format";
-import { slugifyName } from "@/lib/slug";
 import { formatDateLong, formatRelativeTime } from "@/lib/time";
 import { db } from "@/server/db";
 import { detailIncludes, effectivePriceUsd } from "@/server/products/queries";
@@ -57,10 +57,16 @@ export default async function ProductDetailPage({ params }: { params: Params }) 
   const sellerName = product.business?.name ?? product.seller?.name;
   const sellerHref = product.business?.slug
     ? `/negocios/${product.business.slug}`
-    : `/vendedores/${slugifyName(product.seller.name)}`;
+    : `/vendedores/${product.seller.slug}`;
 
   const publishedAt = product.publishedAt ?? product.createdAt;
   const waMessage = `Hola, me interesa "${product.title}" por ${formatUsd(effectiveUsd)} de ${sellerName}`;
+
+  // Categorías ordenadas por position asc (el include ya ordena; el sort es
+  // defensivo). Si `product.categories` está vacío (backwards-compat) no se
+  // renderiza nada y el breadcrumb queda Inicio > Título.
+  const categories = product.categories.slice().sort((a, b) => a.position - b.position);
+  const primaryCategory = categories[0]?.category ?? null;
 
   return (
     <main
@@ -72,12 +78,16 @@ export default async function ProductDetailPage({ params }: { params: Params }) 
           <BreadcrumbItem>
             <BreadcrumbLink href="/">Inicio</BreadcrumbLink>
           </BreadcrumbItem>
-          <BreadcrumbSeparator />
-          <BreadcrumbItem>
-            <BreadcrumbLink href={`/buscar?categoria=${product.category.slug}`}>
-              {product.category.name}
-            </BreadcrumbLink>
-          </BreadcrumbItem>
+          {primaryCategory && (
+            <>
+              <BreadcrumbSeparator />
+              <BreadcrumbItem>
+                <BreadcrumbLink href={`/buscar?categoria=${primaryCategory.slug}`}>
+                  {primaryCategory.name}
+                </BreadcrumbLink>
+              </BreadcrumbItem>
+            </>
+          )}
           <BreadcrumbSeparator />
           <BreadcrumbItem>
             <BreadcrumbPage>{product.title}</BreadcrumbPage>
@@ -101,19 +111,40 @@ export default async function ProductDetailPage({ params }: { params: Params }) 
         </section>
 
         <section aria-label="Información del producto" className="flex flex-col gap-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <a
-              href={`/buscar?categoria=${product.category.slug}`}
-              className="inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3 text-sm font-medium text-secondary-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-            >
-              {product.category.name}
-            </a>
-            <p className="text-xs text-muted-foreground">
-              Publicado {formatRelativeTime(publishedAt)}
-            </p>
-          </div>
+          <p className="text-xs text-muted-foreground">
+            Publicado {formatRelativeTime(publishedAt)}
+          </p>
 
           <h1 className="text-2xl leading-tight font-bold tracking-tight">{product.title}</h1>
+
+          {categories.length > 0 && (
+            <div
+              role="group"
+              aria-label="Categorías del producto"
+              className="flex flex-wrap items-center gap-2"
+            >
+              {categories.map((rel, index) => {
+                const isPrimary = index === 0;
+                return (
+                  <a
+                    key={rel.category.slug}
+                    href={`/buscar?categoria=${rel.category.slug}`}
+                    aria-label={
+                      isPrimary ? `Categoría principal: ${rel.category.name}` : rel.category.name
+                    }
+                    className={cn(
+                      "inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-sm font-medium transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50",
+                      isPrimary
+                        ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                        : "bg-secondary text-secondary-foreground hover:bg-accent hover:text-accent-foreground",
+                    )}
+                  >
+                    {rel.category.name}
+                  </a>
+                );
+              })}
+            </div>
+          )}
 
           <PriceDisplay
             principal={effectiveUsd}

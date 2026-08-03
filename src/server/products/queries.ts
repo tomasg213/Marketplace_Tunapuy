@@ -1,22 +1,24 @@
 // Queries de catálogo compartidas entre home, /buscar y los perfiles (E1).
 // Los Server Components usan estos includes para no duplicar el shape de datos.
+// E2: `User.slug` (único) sustituye el slugifyName() sobre User.name para el
+// enlace al perfil /vendedores/<slug>.
 import type { ProductCardProduct } from "@/components/product/ProductCard";
 import { Prisma } from "@/server/db";
 import { usdToBs } from "@/server/rate/convert";
 import type { BcvRate } from "@/server/rate/rate.service";
-import { slugifyName } from "@/lib/slug";
 
 /** Para grillas de tarjetas: primera imagen + metadatos de vendedor/negocio. */
 export const cardIncludes = {
-  category: true,
+  // Multi-categoría (épica E3): se incluyen ordenadas por position (0 = principal).
+  categories: { include: { category: true }, orderBy: { position: "asc" as const } },
   images: { take: 1, orderBy: { position: "asc" as const } },
   business: { select: { name: true, slug: true } },
-  seller: { select: { name: true } },
+  seller: { select: { name: true, slug: true } },
 } as const;
 
 /** Para el detalle de producto: galería completa + negocio con datos de contacto. */
 export const detailIncludes = {
-  category: true,
+  categories: { include: { category: true }, orderBy: { position: "asc" as const } },
   images: { orderBy: { position: "asc" as const } },
   business: {
     select: {
@@ -27,11 +29,30 @@ export const detailIncludes = {
       phoneNumber: true,
     },
   },
-  seller: { select: { name: true, avatarUrl: true } },
+  seller: { select: { name: true, avatarUrl: true, slug: true } },
 } as const;
 
 export type CardProduct = Prisma.ProductGetPayload<{ include: typeof cardIncludes }>;
 export type DetailProduct = Prisma.ProductGetPayload<{ include: typeof detailIncludes }>;
+
+/** Categoría con la que se asocia una fila de ProductCategory (para breadcrumb). */
+export interface ProductCategoryEntry {
+  slug: string;
+  name: string;
+}
+
+/**
+ * Categoría principal de un producto (épica E3): la de `position` 0, que es la
+ * primera de `product.categories` por el orderBy asc del include. Devuelve
+ * `{ slug, name }` o `null` (un producto sin categorías no debería existir).
+ */
+export function primaryCategory(
+  product: { categories: { category: { slug: string; name: string } }[] },
+): ProductCategoryEntry | null {
+  const primary = product.categories[0]?.category;
+  if (!primary) return null;
+  return { slug: primary.slug, name: primary.name };
+}
 
 /**
  * Precio efectivo en USD (la oferta si existe y es menor) → para Bs y WhatsApp.
@@ -62,8 +83,8 @@ export function toCardProduct(product: CardProduct, rate: BcvRate | null): Produ
     sellerName,
     sellerHref: product.business?.slug
       ? `/negocios/${product.business.slug}`
-      : product.seller?.name
-        ? `/vendedores/${slugifyName(product.seller.name)}`
+      : product.seller?.slug
+        ? `/vendedores/${product.seller.slug}`
         : undefined,
   };
 }

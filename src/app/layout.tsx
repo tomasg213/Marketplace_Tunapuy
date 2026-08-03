@@ -1,20 +1,14 @@
 import type { Metadata } from "next";
-import { Geist_Mono, Inter } from "next/font/google";
+// Fuentes servidas localmente vía Fontsource (sin descarga en build desde
+// fonts.gstatic.com): el entorno de CI/dev no tiene acceso al CDN de Google
+// Fonts y `next/font/google` hacía fallar `npm run build`. Mismo tipo de
+// letra (Inter / Geist Mono) que antes, autohospedada.
+import "@fontsource-variable/inter";
+import "@fontsource-variable/geist-mono";
 import { BottomNav } from "@/components/BottomNav";
 import { SiteFooter } from "@/components/layout/SiteFooter";
 import { SiteHeader } from "@/components/layout/SiteHeader";
 import "./globals.css";
-
-const inter = Inter({
-  variable: "--font-inter",
-  subsets: ["latin"],
-  display: "swap",
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
 
 export const metadata: Metadata = {
   title: {
@@ -33,7 +27,7 @@ export default function RootLayout({
   return (
     <html
       lang="es"
-      className={`${inter.variable} ${geistMono.variable} h-full antialiased`}
+      className="h-full antialiased [--font-inter:'Inter_Variable'] [--font-geist-mono:'Geist_Mono_Variable']"
     >
       <body className="flex min-h-full flex-col pb-24 lg:pb-0">
         <a

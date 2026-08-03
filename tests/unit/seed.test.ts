@@ -83,10 +83,11 @@ async function productsPerCategory(): Promise<Record<string, number>> {
   const client = new Client({ connectionString: TEST_DATABASE_URL });
   try {
     await client.connect();
+    // Multi-categoría (E3): la relación vive en la tabla puente ProductCategory.
     const { rows } = await client.query<{ slug: string; n: number }>(
-      `SELECT c.slug AS slug, count(p.id)::int AS n
+      `SELECT c.slug AS slug, count(pc."productId")::int AS n
          FROM "Category" c
-         LEFT JOIN "Product" p ON p."categoryId" = c.id
+         LEFT JOIN "ProductCategory" pc ON pc."categoryId" = c.id
         GROUP BY c.slug`,
     );
     return Object.fromEntries(rows.map((r) => [r.slug, r.n]));
@@ -108,21 +109,37 @@ afterAll(async () => {
 }, 60_000);
 
 describe("seed — DATA_MODE=mock (BD aislada)", () => {
-  it("es idempotente: 2 ejecuciones → mismos conteos (6 categorías, 13 productos)", async () => {
+  it("es idempotente: 2 ejecuciones → mismos conteos (13 categorías, 17 productos)", async () => {
     runSeed("mock");
     const first = await counts();
     runSeed("mock");
     const second = await counts();
     expect(second).toEqual(first);
-    expect(first).toEqual({ categories: 6, products: 13, users: 6, businesses: 6 });
+    expect(first).toEqual({ categories: 13, products: 17, users: 10, businesses: 10 });
   }, 240_000);
 
   it("crea ≥1 producto por cada categoría fija", async () => {
     const perCat = await productsPerCategory();
-    for (const slug of ["comida", "ropa", "zapatos", "perfume", "automotriz", "licor"]) {
+    // Las 13 categorías del catálogo base deben tener al menos un producto.
+    const slugs = [
+      "comida",
+      "ropa",
+      "zapatos",
+      "perfume",
+      "automotriz",
+      "licor",
+      "tecnologia",
+      "servicios",
+      "joyas",
+      "manufactura",
+      "artesanias",
+      "construccion",
+      "ferreteria",
+    ];
+    for (const slug of slugs) {
       expect(perCat[slug] ?? 0, `categoría ${slug} sin productos`).toBeGreaterThanOrEqual(1);
     }
-    // Automotriz tiene 3 (incluye 1 borrador DRAFT); las demás 2.
+    // Automotriz tiene 3 (incluye 1 borrador DRAFT); el resto al menos 1.
     expect(perCat.automotriz).toBeGreaterThanOrEqual(2);
   }, 60_000);
 });
@@ -135,7 +152,7 @@ describe("seed — DATA_MODE=real (BD aislada)", () => {
     runSeed("real");
     const second = await counts();
     expect(second).toEqual(first);
-    // Solo el catálogo base: categorías; cero vendedores/productos/negocios ficticios.
-    expect(first).toEqual({ categories: 6, products: 0, users: 0, businesses: 0 });
+    // Solo el catálogo base: 13 categorías; cero vendedores/productos/negocios ficticios.
+    expect(first).toEqual({ categories: 13, products: 0, users: 0, businesses: 0 });
   }, 240_000);
 });

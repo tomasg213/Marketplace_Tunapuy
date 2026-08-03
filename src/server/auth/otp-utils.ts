@@ -1,76 +1,76 @@
-// Utilidades de códigos OTP (docs/architecture.md §2.2, modelo OtpCode).
-// El código en texto plano NUNCA se persiste: se guarda `hashOtpCode()`.
-// Algoritmo: sha256 con salt aleatorio por código (16 bytes hex).
-// Seguridad: comparación timing-safe y sin sesgo de módulo en la generación.
-import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
+// Utilidades de códigos OTP (dictamen security E2 — R3).
+//
+// El código se guarda como `salt:HMAC-SHA256(AUTH_SECRET, salt + code)`:
+//   - HMAC keyed: sin AUTH_SECRET (pepper) no se puede recuperar ni adivinar
+//     el código aunque se filtre la BD (a diferencia del sha256 plano).
+//   - salt aleatorio por emisión (32 bytes hex) contra rainbow tables.
+//   - comparación timing-safe.
+//
+// R2: el TTL y el máximo de intentos se leen aquí con defaults del dictamen
+// (5 min / 5 intentos) pero se sobrescriben por configuración en tiempo de
+// verificación (señal de llamada directa a verifyOtp).
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { env } from "@/server/env";
 
-export const OTP_CODE_LENGTH = 6;
-export const OTP_DEFAULT_TTL_MINUTES = Number(process.env.OTP_TTL_MINUTES ?? 5);
-export const OTP_DEFAULT_MAX_ATTEMPTS = Number(process.env.OTP_MAX_ATTEMPTS ?? 5);
+/** Formato: `<salt-hex>:<hmac-hex>` (salt 32 bytes → 64 hex, hmac 32 bytes → 64 hex). */
+export const OTP_HASH_REGEX = /^[0-9a-f]{64}:[0-9a-f]{64}$/;
 
-/**
- * Genera un código numérico de `length` dígitos usando crypto.randomInt
- * (sin sesgo de módulo). Ej.: "482913".
- */
-export function generateOtpCode(length: number = OTP_CODE_LENGTH): string {
-  let code = "";
-  for (let i = 0; i < length; i += 1) {
-    code += String(randomInt(0, 10));
-  }
-  return code;
+/** TTL por defecto (5 minutos) y máximo de intentos (5). */
+export const OTP_DEFAULT_TTL_MINUTES = 5;
+export const OTP_DEFAULT_MAX_ATTEMPTS = 5;
+
+/** Fecha de expiración de un código recién emitido (now + TTL). */
+export function otpExpiresAt(ttlMinutes = OTP_DEFAULT_TTL_MINUTES): Date {
+  return new Date(Date.now() + ttlMinutes * 60 * 1000);
 }
 
-/** Valida el formato de un código OTP (solo dígitos, longitud correcta). */
-export function isValidOtpFormat(code: string, length: number = OTP_CODE_LENGTH): boolean {
-  return new RegExp(`^\\d{${length}}$`).test(code);
+/** ¿El código ya venció? */
+export function isOtpExpired(expiresAt: Date): boolean {
+  return expiresAt.getTime() <= Date.now();
 }
 
-/** Genera un salt aleatorio en hex (16 bytes). */
-export function generateSalt(): string {
-  return randomBytes(16).toString("hex");
-}
-
-/**
- * Hashea un código OTP: `"<salt>:<sha256(salt + code)>"`.
- * Almacenar este string en `OtpCode.codeHash`, nunca el código plano.
- */
-export function hashOtpCode(code: string, salt: string = generateSalt()): string {
-  const hash = createHash("sha256").update(salt).update(code).digest("hex");
-  return `${salt}:${hash}`;
-}
-
-/** Verifica un código contra un `codeHash` almacenado (timing-safe). */
-export function verifyOtpCode(code: string, stored: string): boolean {
-  const [salt, expectedHex] = stored.split(":");
-  if (!salt || !expectedHex) return false;
-  if (!isValidOtpFormat(code)) return false;
-
-  const expected = Buffer.from(expectedHex, "hex");
-  const actual = Buffer.from(
-    createHash("sha256").update(salt).update(code).digest("hex"),
-    "hex",
-  );
-
-  return expected.length === actual.length && timingSafeEqual(expected, actual);
-}
-
-/** ¿El código ya venció? (`expiresAt` <= ahora). */
-export function isOtpExpired(expiresAt: Date, now: Date = new Date()): boolean {
-  return expiresAt.getTime() <= now.getTime();
-}
-
-/** ¿Quedan intentos de verificación? (se invalida al alcanzar el máximo). */
-export function hasAttemptsLeft(
-  attempts: number,
-  maxAttempts: number = OTP_DEFAULT_MAX_ATTEMPTS,
-): boolean {
+/** ¿Quedan intentos de verificación? */
+export function hasAttemptsLeft(attempts: number, maxAttempts = OTP_DEFAULT_MAX_ATTEMPTS): boolean {
   return attempts < maxAttempts;
 }
 
-/** Calcula `expiresAt` = now + TTL (minutos). */
-export function otpExpiresAt(
-  now: Date = new Date(),
-  ttlMinutes: number = OTP_DEFAULT_TTL_MINUTES,
-): Date {
-  return new Date(now.getTime() + ttlMinutes * 60_000);
+/**
+ * Hash del código OTP con HMAC keyed por AUTH_SECRET.
+ * Devuelve `salt:hmac`; el código en claro NO se persiste ni se loguea (R7).
+ */
+export function hashOtpCode(code: string): string {
+  const salt = randomBytes(32).toString("hex");
+  return `${salt}:${hmac(salt, code)}`;
+}
+
+function hmac(salt: string, code: string): string {
+  return createHmac("sha256", env.AUTH_SECRET).update(`${salt}:${code}`).digest("hex");
+}
+
+/**
+ * Verifica `code` contra un hash persistido (`salt:hmac`).
+ * Comparación timing-safe; nunca revolver el hash.
+ */
+export function verifyOtpCode(code: string, storedHash: string): boolean {
+  if (!OTP_HASH_REGEX.test(storedHash)) return false;
+  const [salt, expectedHex] = storedHash.split(":");
+  const actual = Buffer.from(hmac(salt, code), "hex");
+  const expected = Buffer.from(expectedHex, "hex");
+  return actual.length === expected.length && timingSafeEqual(actual, expected);
+}
+
+/** Genera un código OTP numérico de `digits` dígitos (por defecto 6). */
+export function generateOtpCode(digits = 6): string {
+  if (digits < 4 || digits > 10) throw new Error("digits must be between 4 and 10");
+  const max = 10 ** digits;
+  const bytes = Math.ceil((digits * Math.log2(10) + 8) / 8);
+  const bits = bytes * 8;
+  // Rejection sampling: solo acepta valores dentro del múltiplo más alto de
+  // `max`, eliminando el sesgo del módulo (uniforme real).
+  const limit = Math.floor(2 ** bits / max) * max;
+  let out = 0;
+  do {
+    out = Number(randomBytes(bytes).readUIntBE(0, bytes));
+  } while (out >= limit);
+  return (out % max).toString().padStart(digits, "0");
 }

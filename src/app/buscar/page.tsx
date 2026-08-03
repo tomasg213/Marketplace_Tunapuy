@@ -36,7 +36,9 @@ export default async function BuscarPage({ searchParams }: { searchParams: Searc
 
   const where: Prisma.ProductWhereInput = {
     status: "ACTIVE",
-    ...(categoria ? { category: { slug: categoria } } : {}),
+    // Multi-categoría (épica E3): el filtro pasa por la tabla puente
+    // ProductCategory (antes era la relación directa `category`, que ya no existe).
+    ...(categoria ? { categories: { some: { category: { slug: categoria } } } } : {}),
     ...(q
       ? {
           OR: [

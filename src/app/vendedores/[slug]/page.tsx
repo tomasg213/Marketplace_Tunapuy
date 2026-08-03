@@ -1,12 +1,12 @@
-// /vendedores/[slug] — Perfil de vendedor persona (Épica E1).
-// User no tiene columna slug en el schema E0: el slug se deriva de User.name
-// (slugifyName). Limitación conocida (colisiones de nombre) → User.slug único
-// en una migración futura; para el volumen local del MVP el lookup es válido.
+// /vendedores/[slug] — Perfil de vendedor persona (Épica E1, actualizado E2).
+// E2: lookup por `User.slug` (único, backfill aplicado). Mejora: un usuario con
+// role SELLER pero sin publicaciones activas renderiza su perfil con estado
+// vacío (200, no 404). Las cuentas BUYER no se exponen (404).
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { ProductCard } from "@/components/product/ProductCard";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { slugifyName } from "@/lib/slug";
+import { USER_ROLE } from "@/lib/constants";
 import { db } from "@/server/db";
 import { cardIncludes, toCardProduct } from "@/server/products/queries";
 import { getBcvRate, type BcvRate } from "@/server/rate/rate.service";
@@ -17,8 +17,12 @@ type Params = Promise<{ slug: string }>;
 
 export async function generateMetadata({ params }: { params: Params }): Promise<Metadata> {
   const { slug } = await params;
-  const user = await findSellerBySlug(slug);
-  return { title: user?.name ? `Vendedor: ${user.name}` : "Vendedor no encontrado" };
+  const user = await db.user.findUnique({
+    where: { slug },
+    select: { name: true, role: true },
+  });
+  const visible = user && user.role === USER_ROLE.SELLER;
+  return { title: visible ? `Vendedor: ${user.name}` : "Vendedor no encontrado" };
 }
 
 export default async function SellerProfilePage({ params }: { params: Params }) {
@@ -31,8 +35,19 @@ export default async function SellerProfilePage({ params }: { params: Params }) 
     rate = null;
   }
 
-  const seller = await findSellerBySlug(slug);
-  if (!seller) notFound();
+  const seller = await db.user.findUnique({
+    where: { slug },
+    include: {
+      products: {
+        where: { status: "ACTIVE" },
+        orderBy: { publishedAt: "desc" },
+        include: cardIncludes,
+      },
+    },
+  });
+
+  // Solo perfiles SELLER: las cuentas BUYER (que no publican) no se exponen.
+  if (!seller || seller.role !== USER_ROLE.SELLER) notFound();
 
   return (
     <main id="main-content" className="mx-auto w-full max-w-5xl flex-1 px-4 pt-6 pb-10 lg:pb-12">
@@ -61,27 +76,24 @@ export default async function SellerProfilePage({ params }: { params: Params }) 
             ))}
           </div>
         ) : (
-          <p className="rounded-lg border border-dashed border-border bg-card px-6 py-10 text-center text-sm text-muted-foreground">
-            Este vendedor aún no tiene publicaciones activas.
-          </p>
+          <div
+            role="status"
+            className="flex flex-col items-center gap-4 rounded-lg border border-dashed border-border bg-card px-6 py-12 text-center"
+          >
+            <p className="text-base text-muted-foreground">
+              Este vendedor aún no tiene publicaciones activas.
+            </p>
+            <a
+              href="/vender"
+              className="inline-flex min-h-11 items-center justify-center rounded-sm bg-primary px-5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+            >
+              ¿Quieres vender aquí?
+            </a>
+          </div>
         )}
       </section>
     </main>
   );
-}
-
-async function findSellerBySlug(slug: string) {
-  const sellers = await db.user.findMany({
-    where: { products: { some: { status: "ACTIVE" } } },
-    include: {
-      products: {
-        where: { status: "ACTIVE" },
-        orderBy: { publishedAt: "desc" },
-        include: cardIncludes,
-      },
-    },
-  });
-  return sellers.find((seller) => slugifyName(seller.name) === slug) ?? null;
 }
 
 function initials(name: string): string {

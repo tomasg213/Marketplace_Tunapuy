@@ -1,8 +1,10 @@
-# Arquitectura técnica — Marketplace_Tunapuy (E0)
+# Arquitectura técnica — Marketplace_Tunapuy (E0/E2)
 
-> Documento de arquitectura para la épica E0 (scaffold y vitrina local).
-> Autor: `tech-architect`. Estado: **v2 — actualizado tras la implementación del
-> scaffold E0** (decisiones confirmadas: auth OTP por teléfono y PostgreSQL en dev).
+> Documento de arquitectura para las épicas E0 (scaffold y vitrina local) y E2
+> (auth OTP funcional + sesión, `User.slug` y CRUD del vendedor).
+> Autor: `tech-architect`. Estado: **v3 — actualizado tras la implementación de
+> E2** (auth OTP por teléfono funcional, sesión JWT con jose, `User.slug` único,
+> CRUD del vendedor, imágenes local con magic bytes, business).
 > Convención: documentación en español; código, variables y nombres en inglés.
 
 ---
@@ -18,6 +20,13 @@ botón "Escríbenos por WhatsApp" que abre `https://wa.me/<teléfono>` del vende
 - Auth: **login por teléfono + código OTP** (cambio confirmado vs. v1). `User.phoneNumber` es el
   identificador único de login; `email` queda opcional; se eliminó `passwordHash`. Los códigos
   OTP se guardan hasheados (`OtpCode.codeHash`), nunca en texto plano.
+- Sesión (E2): cookie `tunapuy_session` **httpOnly** con token JWT HS256 firmado con jose
+  (`AUTH_SECRET`), TTL 30 días, `secure` en producción y `sameSite=lax`. Guard edge en
+  `src/middleware.ts` para `/vender`, `/mis-publicaciones` y `/cuenta` → `/login?next=…`;
+  server actions/route handlers re-validan con `requireAuth()` (defensa en profundidad).
+- Identidad de vendedor (E2): `User.slug` **único y NOT NULL** (migración en 2 pasos + backfill).
+  Las URLs públicas del perfil (`/vendedores/<slug>`) y las tarjetas usan `User.slug`, no
+  `slugifyName(name)`.
 - Prisma **ORM 7**: cliente generado con el nuevo provider `prisma-client` (TypeScript, sin motor
   Rust) y conexión vía driver adapter (`@prisma/adapter-pg`). Configuración en `prisma.config.ts`.
 - Precios: `priceUsd` (obligatorio), `offerPriceUsd` (opcional) y precio en Bs. **calculado en
@@ -224,6 +233,7 @@ model User {
   email       String?    @unique // OPCIONAL (cambio OTP)
   phoneNumber String     @unique // E.164, IDENTIFICADOR DE LOGIN (cambio OTP)
   name        String
+  slug        String     @unique // slug público de vendedor (E2: NOT NULL, backfill)
   avatarUrl   String?
   role        String     @default("BUYER") // BUYER | SELLER | ADMIN (constantes TS)
   business    Business?
@@ -537,11 +547,21 @@ BCV_RATE_FALLBACK=746.6297
 OTP_PROVIDER=dev
 OTP_TTL_MINUTES=5               # validez de cada código
 OTP_MAX_ATTEMPTS=5              # intentos máximos antes de invalidar
+# Rate limit de solicitudes: constantes en src/server/auth/rate-limit.ts
+# (OTP_REQUEST_MAX=5, OTP_REQUEST_WINDOW_MS=15 min; se harán env en E3).
 # Meta Cloud API (solo si OTP_PROVIDER=whatsapp)
 META_WHATSAPP_TOKEN=
 META_WHATSAPP_PHONE_NUMBER_ID=
 META_WHATSAPP_BUSINESS_ACCOUNT_ID=
 META_WHATSAPP_OTP_TEMPLATE=otp_verification
+
+# ------------------------------------------------------------------
+# Sesión (E2) — token JWT HS256 con jose (cookie httpOnly)
+# ------------------------------------------------------------------
+# Mínimo 16 caracteres. Nunca commitear el valor real (usar .env.example).
+AUTH_SECRET=dev-secret-tunapuy-0123456789abcdef
+# TTL de la sesión: constante SESSION_TTL_SECONDS=30 días en
+# src/server/auth/session-token.ts (se hará env si se requiere en E3).
 
 # ------------------------------------------------------------------
 # Imágenes (contrato definido; integración real en E3)
@@ -673,6 +693,12 @@ interface ImageStorage {
 | D13 | Login por **teléfono + OTP** (sin contraseña) | Email + passwordHash | Decisión de producto del PM; `User.phoneNumber` UNIQUE es el login |
 | D14 | OTP: `OtpCode.codeHash` + salt, nunca texto plano | Guardar código en claro | El hash se verifica timing-safe; robo de BD no expone códigos |
 | D15 | Prisma 7 (provider `prisma-client`, driver adapter, `prisma.config.ts`) | Prisma v6/`prisma-client-js` | Versión vigente; cliente TS nativo sin binario Rust |
+| D16 | Sesión en cookie JWT HS256 (jose) httpOnly + `AUTH_SECRET` ≥16 chars | Sessions en tabla / JWT en localStorage | Sin lectura de BD por request; XSS no accede a la cookie; stateless |
+| D17 | `User.slug` único NOT NULL (migración 2 pasos + backfill idempotente) | Slug derivado en render (`slugifyName`) | URL estable sin acentos; dedupe determinista; sin depender del nombre |
+| D18 | CRUD del vendedor: server actions + route handlers sobre un mismo servicio | Dos implementaciones paralelas | Una sola lógica de negocio; ownership y validación en el server |
+| D19 | Imágenes: contrato `ImageStorage` + provider local (magic bytes, uuid) | Path del cliente / multer | Validación por contenido real (MIME no confiable); nombre uuid; S3/Cloudinary en E3 sin tocar el resto |
+| D20 | Rate limit OTP en memoria (IP+teléfono, 5/15 min) | Solo por IP | El teléfono es la unidad real de abuso (IP compartida en NAT); en prod multi-instancia se sustituirá por Redis (E3) |
+| D21 | Registro por OTP = find-or-create (sin paso "registrarse" separado) | Formulario de registro previo | El mismo flujo sirve login y registro; `name` provisional editable después |
 
 ---
 
@@ -719,3 +745,176 @@ interface ImageStorage {
 - [x] Vitest (24 casos: convert, format, otp-utils) y smoke E2E de Playwright (§6.2) en verde.
 - [x] Build y lint en verde; precios verificados end-to-end (`$25.00` → `Bs. 18.665,74` con tasa 746.6297).
 - [ ] Consultar `security-reviewer` antes del auth funcional OTP (E1).
+
+---
+
+## 11. Épica E2 — auth OTP funcional, sesión, `User.slug` y CRUD del vendedor
+
+### 11.1 Alcance implementado (estado al cierre de E2)
+
+- **Auth OTP funcional** (dev): `requestOtp`/`verifyOtp` en `src/server/auth/auth.service.ts`
+  (lógica pura, sin Next.js) + rutas `/api/auth/{request,verify,logout,me}`.
+- **Sesión JWT**: `src/server/auth/session-token.ts` (jose HS256) y `session.ts`
+  (`createSession`/`getSession`/`destroySession`/`requireAuth`/`getCurrentUser`).
+- **Guard edge**: `src/middleware.ts` (matcher `/vender/:path*`, `/mis-publicaciones/:path*`,
+  `/cuenta/:path*` → redirect `/login?next=…`).
+- **`User.slug`**: migración en 2 pasos (`add_user_slug` nullable → backfill
+  `prisma/backfill-user-slugs.ts` → `user_slug_required` NOT NULL); seed asigna slugs estables.
+- **CRUD del vendedor**: `products/service.ts` (lógica de negocio + ownership) compartida por
+  server actions (`products/actions.ts`) y `/api/products`; `PRODUCT_STATUS` añade `SOLD`.
+- **Imágenes local**: contrato `ImageStorage` + `local.ts` (magic bytes, uuid, `public/uploads`),
+  `/api/uploads` (multipart, ownership, límite 5 MB, position 0–15).
+- **Business**: `business/validators.ts` + `actions.ts` (`createBusiness`, uno por cuenta).
+- **Páginas protegidas mínimas**: `/login` (form OTP con `devCode` en dev), `/mis-publicaciones`,
+  `/cuenta`, `/vender` (alta con imagen). UI final a cargo del `designer`.
+
+### 11.2 Flujo de sesión (secuencia de red)
+
+```
+POST /api/auth/request { phoneNumber }        (dev: el código se loguea + devCode)
+  → rate limit (5/15 min por IP+teléfono) → OtpCode{codeHash, expiresAt=now+5min}
+POST /api/auth/verify { phoneNumber, code, redirectTo }
+  → verify timing-safe → consumedAt=now
+  → find-or-create User (name "Usuario <4 dígitos>", slug único, role BUYER)
+  → createSession(userId) [Set-Cookie tunapuy_session httpOnly]
+  → 200 { redirectTo } (solo devuelve redirectTo permitido por next/redirectTo)
+GET /api/auth/me → { user } (o 401)
+POST /api/auth/logout → borra la cookie
+```
+
+- **Open redirect**: `redirectTo` se valida contra una lista de rutas locales permitidas
+  (`/mis-publicaciones`, `/cuenta`, `/vender`, …); nunca `//host` ni URLs absolutas externas.
+- **Seguridad de la cookie**: `httpOnly`, `secure` en producción, `sameSite=lax`, `path=/`.
+- El registro es **find-or-create**: no hay pantalla separada; el flujo de login crea la cuenta
+  si no existe. El `name` provisional se puede editar en la UI de cuenta (futuro).
+
+### 11.3 Rate limiting OTP
+
+- `RateLimiter` en memoria (`src/server/auth/rate-limit.ts`), clave = `IP|phoneNumber`,
+  ventana deslizante de 15 min, máx 5 solicitudes (configurable por env).
+- La respuesta de `/api/auth/request` es **siempre genérica** (incluso ante `rate_limited`):
+  no revela si el teléfono está registrado.
+- Limitación conocida (E3): en despliegues multi-instancia la memoria por proceso no alcanza;
+  se migrará a Redis. `devCode` solo se expone con `OTP_PROVIDER=dev`, nunca en producción.
+
+### 11.4 Validación e identidad
+
+- `src/server/validators.ts` centraliza `e164PhoneSchema` (E.164, prefijo VE) re-exportado por
+  `products/validators.ts` para compatibilidad de tests.
+- `src/lib/slug.ts`: `slugify` (kebab-case ASCII) + `uniqueSlug` (dedupe `-2`, `-3`, …). El slug
+  de producto es opcional al crear: se genera del título con dedupe dentro de la transacción.
+- Al publicar (ACTIVE) el usuario pasa a `role=SELLER` (`updateMany` idempotente) y se fija
+  `publishedAt` si aún no existía (borradores DRAFT no aparecen en vitrina).
+
+### 11.5 Endpoints E2 (resumen)
+
+| Método y ruta | Auth | Descripción |
+|---|---|---|
+| POST `/api/auth/request` | no | Solicita código OTP (rate limit; respuesta genérica) |
+| POST `/api/auth/verify` | no | Verifica código y crea sesión (find-or-create) |
+| POST `/api/auth/logout` | no | Borra la cookie de sesión |
+| GET `/api/auth/me` | sí | Datos públicos del usuario actual |
+| GET `/api/products?status=` | sí | Publicaciones del usuario (dashboard) |
+| POST `/api/products` | sí | Crea producto (validación + ownership) |
+| PATCH/DELETE `/api/products/[id]` | sí | Edita (parcial) / elimina (solo dueño) |
+| POST `/api/uploads` | sí | Sube imagen y la asocia a un producto del dueño |
+
+### 11.6 Checklist E2 (estado al cierre)
+
+- [x] `User.slug` NOT NULL + backfill idempotente (migraciones `20260802210000/10001`).
+- [x] Sesión JWT con jose + cookie httpOnly + `AUTH_SECRET` validado en `env.ts`.
+- [x] `requestOtp`/`verifyOtp` (hash timing-safe, un solo uso, TTL, intentos) + rate limit.
+- [x] CRUD productos con ownership + `SOLD` en `PRODUCT_STATUS`.
+- [x] Imágenes local (magic bytes, uuid) + `/api/uploads`.
+- [x] Business (`createBusiness`, uno por cuenta, slug dedupe).
+- [x] Páginas protegidas mínimas (`/login`, `/mis-publicaciones`, `/cuenta`, `/vender`).
+- [x] Seed con `User.slug` + backfill de arranque.
+- [x] Typecheck (`tsc --noEmit`), lint, build y `npm test` (80 unit) en verde.
+- [x] E2E OTP → publicar → `/mis-publicaciones` en verde.
+- [ ] Revisión `security-reviewer` de auth OTP y cookies (pendiente formal, ya con guards).
+
+## 12. Estado real tras el dictamen security (R1–R11) y épicas posteriores
+
+> La sección 11 documenta el diseño original (JWT, rate limit en memoria). Esta
+> sección es la **fuente de verdad actual**: el dictamen del security-reviewer
+> (R1–R11) cambió el diseño de auth, sesión, rate limit e imágenes.
+
+### 12.1 Sesión opaca (R4) — sin JWT
+
+- `src/server/auth/session-token.ts` genera un token opaco (64 bytes de
+  aleatoriedad) y `session-record.ts` persiste en BD `Session{tokenHash=sha256,
+  expiresAt=+30d}`. Cookie `__Host-tunapuy_session` (`httpOnly`, `secure` en
+  producción, `sameSite=lax`, `path=/`). Renovación deslizante en
+  `session-cookie.ts`. Nada del token viaja al cliente (solo el hash en BD).
+- `session.ts` expone `getSession`/`requireAuth`/`getCurrentUser` (usa
+  `getSessionToken(source?)` con request explícito para API routes).
+
+### 12.2 Dictamen R1–R11 (auth + uploads) — estado
+
+- **R1 rate limit en BD** (`AuthRateLimit`, tabla por key+ventana, TTL): los 4
+  buckets de request (por teléfono 1/min, 5/h, 10/día + por IP 10/h) y los 2 de
+  verify (15/h teléfono, 20/h IP) se evalúan **siempre antes** de generar o
+  verificar el código. `setBlocked` usa un bucket separado `block:<key>` que
+  `assertRateLimit` chequea primero → 429 duro de 30 min sin consumir hits.
+- **R2** un solo código activo por teléfono (re-solicitar invalida), TTL 5 min,
+  máx 5 intentos, consumo único atómico en la **misma transacción** que el
+  find-or-create del usuario y la creación de sesión.
+- **R3** código hash = `HMAC-SHA256(AUTH_SECRET, salt)` con formato
+  `salt(64 hex):hmac(64 hex)` y comparación timing-safe (`verifyOtpCode`).
+- **R6** teléfono VE (`+58` + 10 dígitos) validado **antes** de generar;
+  `/api/auth/request` responde **siempre 200 genérico** (sin enumeración).
+- **R7** guarda de producción: `OTP_PROVIDER=dev` es error de arranque salvo
+  despliegue local/mock (`isLocalMockDeployment()`: `DATA_MODE=mock` o APP_URL
+  localhost). Explicación: `next build && next start` local corre con
+  NODE_ENV=production y e2e necesita el `devCode`.
+- **R8** `User.slug @unique` (migración 2 pasos + `backfillUserSlugs`).
+- **R9** imágenes: solo jpeg/png/webp por **magic bytes**, máx 5 MB, folders de
+  la whitelist `products|businesses|users` (`safe-key.ts`); storage fuera de
+  `public/` en `.uploads/` servido por `GET /uploads/[...key]` con
+  `assertSafeKey` (path traversal) + `X-Content-Type-Options: nosniff`.
+- **R10** producto nace `DRAFT` (`createProductSchema` default), transiciones de
+  estado validadas en `products/service.ts` (ARCHIVED no editable salvo
+  reactivación), slug duplicado → 409 `ProductSlugConflictError`.
+- **R11** `env.ts` valida variables con zod al importar (fail-fast): `AUTH_SECRET`
+  ≥32 chars, `OTP_PROVIDER` enum, whatsapp exige `META_*`.
+
+**Rate limit por IP exento en local/mock** (`ipRateLimitEnabled()` en
+`auth.service.ts`): sin proxy headers el IP del cliente es `"unknown"` (bucket
+único compartido por todo localhost) y tras 10 requests/h se auto-bloquea 30 min,
+rompiendo dev/e2e multi-ejecución. En local/mock se aplican los buckets **por
+teléfono** (la defensa real por número); en producción (DATA_MODE=db + dominio
+público detrás de proxy con `x-forwarded-for`) el rate limit por IP aplica completo.
+
+### 12.3 Perfiles editables (backend)
+
+- `POST /api/uploads` acepta `folder=users|businesses` (avatar/logo) además del
+  modo producto (`productId`); con `folder=businesses` exige `businessId` +
+  ownership (`Business.ownerId`). Responde `{ url, key }` sin fila en BD.
+- `src/server/cuenta/actions.ts`: `updateUserProfileAction` (nombre, email
+  opcional, avatarUrl) y `updateBusinessAction` (nombre, descripción, teléfono,
+  logoUrl) — requireAuth, solo el negocio propio (`ownerId`), teléfono del
+  usuario SOLO LECTURA. Devuelven `{ ok } | { ok: false, error }`.
+- `assertUploadedImageUrl()` (`images/validate-upload-url.ts`): las acciones solo
+  aceptan URLs de **nuestro** storage (`/uploads/<folder>/` relativa o absoluta
+  same-origin, key segura) → nada de `javascript:`/`data:`/URLs externas (XSS).
+- "use server" no puede exportar clases ni consts no-async (Turbopack): los
+  errores de negocio se mantienen como clases no exportadas o se eliminan.
+
+### 12.4 Multi-categoría (épica E3) — impacto en catálogo
+
+- 13 categorías fijas en `src/lib/constants.ts` (`CategorySlug`); relación
+  `ProductCategory{productId, categoryId, position}` (1–3 por producto,
+  `position 0` = principal). `categorySlugsSchema` valida 1–3 en el borde.
+- `/buscar` filtra por `categories: { some: { category: { slug } } }` (la
+  relación directa `category` ya no existe — bug de 500 corregido).
+- Seed mock: 13 categorías, 10 vendedores, 10 negocios, 17 productos (los 3
+  tests de seed verifican conteos e idempotencia contra BD aislada).
+
+### 12.5 Verificación al cierre
+
+- `tsc --noEmit` limpio · `npm run lint` (0 errores) · `npm run build` OK (19
+  rutas) · `npm test` 188/188 (18 archivos) · `npm run test:e2e` 29/29.
+- E2E cubre: OTP dev (devCode) → publicar (CategoryPicker) → dashboard;
+  logout; catálogo multi-categoría; uploads; rutas privadas con middleware.
+
+

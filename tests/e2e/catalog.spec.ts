@@ -83,8 +83,8 @@ test("detalle de producto: breadcrumb, título, precio y sticky WhatsApp", async
   const sticky = page.getByRole("region", { name: "Contacto del anuncio" });
   const waLink = sticky.getByRole("link", { name: /whatsapp/i });
   await expect(waLink).toBeVisible();
-  const href = await waLink.getAttribute("href");
-  expect(href).toMatch(/^https:\/\/wa\.me\/\d+\?text=/);
+  await expect(waLink).toHaveAttribute("href", /^https:\/\/wa\.me\/\d+\?text=/);
+  const href = (await waLink.getAttribute("href")) ?? "";
   expect(href).not.toContain("+");
   expect(decodeURIComponent(href)).toContain('me interesa "Arepa Reina Pepiada"');
   expect(decodeURIComponent(href)).toContain("por $3.50 de");

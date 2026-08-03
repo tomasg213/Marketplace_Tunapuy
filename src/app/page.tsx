@@ -89,7 +89,7 @@ export default async function HomePage() {
         <h2 id="categories-heading" className="mb-3 text-xl font-bold tracking-tight">
           Categorías
         </h2>
-        <CategoryChips categories={categories} />
+        <CategoryChips categories={categories} showAll />
       </section>
 
       {featured.length > 0 && (

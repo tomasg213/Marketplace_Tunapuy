@@ -21,6 +21,9 @@
 /.next/
 /out/
 
+# uploads en runtime (fuera de public/ — fix de fotos E3, se sirven por /uploads/[...key])
+/.uploads/
+
 # production
 /build
 

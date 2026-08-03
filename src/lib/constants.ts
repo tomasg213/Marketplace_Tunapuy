@@ -2,6 +2,7 @@
 // (documentadas en docs/architecture.md §1.1 y §2.1)
 
 // Categorías fijas del marketplace (seed idempotente, tabla `Category`).
+// Positions: las 6 originales quedan 1–6; las 7 nuevas van 7–13.
 export const CATEGORIES = [
   { slug: "comida", name: "Comida", icon: "UtensilsCrossed", position: 1 },
   { slug: "ropa", name: "Ropa", icon: "Shirt", position: 2 },
@@ -9,6 +10,13 @@ export const CATEGORIES = [
   { slug: "perfume", name: "Perfume", icon: "SprayCan", position: 4 },
   { slug: "automotriz", name: "Automotriz", icon: "Car", position: 5 },
   { slug: "licor", name: "Licor", icon: "Wine", position: 6 },
+  { slug: "tecnologia", name: "Tecnología", icon: "Smartphone", position: 7 },
+  { slug: "servicios", name: "Servicios", icon: "Briefcase", position: 8 },
+  { slug: "joyas", name: "Joyas", icon: "Gem", position: 9 },
+  { slug: "manufactura", name: "Manufactura", icon: "Factory", position: 10 },
+  { slug: "artesanias", name: "Artesanías", icon: "Palette", position: 11 },
+  { slug: "construccion", name: "Construcción", icon: "HardHat", position: 12 },
+  { slug: "ferreteria", name: "Ferretería", icon: "Wrench", position: 13 },
 ] as const;
 
 export type CategorySlug = (typeof CATEGORIES)[number]["slug"];
@@ -19,6 +27,7 @@ export const PRODUCT_STATUS = {
   ACTIVE: "ACTIVE",
   PAUSED: "PAUSED",
   ARCHIVED: "ARCHIVED",
+  SOLD: "SOLD", // marcado como agotado (Épica E2)
 } as const;
 
 export type ProductStatus = (typeof PRODUCT_STATUS)[keyof typeof PRODUCT_STATUS];
