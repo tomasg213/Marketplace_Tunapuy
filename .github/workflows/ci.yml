@@ -1,0 +1,114 @@
+# CI — Marketplace_Tunapuy (docs/deployment.md)
+#
+# Se ejecuta en cada PR y en cada push a `develop` / `main`.
+# Pipeline: npm ci → lint → build → prisma migrate deploy + seed (DATA_MODE=mock)
+#           → tests unitarios (Vitest) → tests E2E (Playwright).
+#
+# La BD de pruebas es un servicio Postgres 16 (el mismo que `docker-compose.yml`)
+# con healthcheck; la app y los tests la consumen vía `DATABASE_URL`.
+#
+# Estrategia por rama (deployment.md §4):
+#   - PR / push a develop → preview con DATA_MODE=mock.
+#   - merge a main         → producción con DATA_MODE=real.
+# Los secrets de despliegue (DATABASE_URL por entorno, etc.) se inyectan en el
+# paso de deploy; hasta que se conecte el proveedor, este workflow solo ejecuta
+# la verificación CI completa para ambas ramas.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [develop, main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # BD de pruebas: servicio contenedor del propio workflow (ver `services`).
+  DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tunapuy
+  # El CI siempre valida contra datos mock (el smoke E2E corre contra mock,
+  # docs/architecture.md §4.4). En deploy, DATA_MODE la define la rama.
+  DATA_MODE: mock
+  OTP_PROVIDER: dev
+  # Tasa estática de respaldo para que el precio en Bs sea determinista en CI
+  # (evita depender de que dolarapi responda desde el runner).
+  BCV_RATE_FALLBACK: "746.6297"
+  PLAYWRIGHT_BASE_URL: http://localhost:3000
+  NEXT_TELEMETRY_DISABLED: "1"
+
+jobs:
+  ci:
+    name: lint · build · tests · e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      # PostgreSQL 16 idéntico al de docker-compose.yml (dev local).
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: tunapuy
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d tunapuy"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22 (con caché de npm)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # npm ci ejecuta `postinstall: prisma generate` (cliente en /generated).
+      - name: Instalar dependencias (npm ci)
+        run: npm ci
+
+      # Caché del build incremental de Next.js (.next/cache).
+      - name: Caché del build de Next.js
+        uses: actions/cache@v4
+        with:
+          path: .next/cache
+          key: ${{ runner.os }}-nextjs-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-nextjs-
+
+      # Caché de los binarios de Playwright (clave: versión de @playwright/test).
+      - name: Caché de binarios de Playwright
+        id: cache-playwright
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Instalar Chromium de Playwright (con dependencias de sistema)
+        if: steps.cache-playwright.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Lint (ESLint)
+        run: npm run lint
+
+      - name: Build de producción
+        run: npm run build
+
+      - name: Aplicar migraciones (db:deploy)
+        run: npm run db:deploy
+
+      - name: Seed de la BD de pruebas (DATA_MODE=mock)
+        run: npm run db:seed
+
+      - name: Tests unitarios (Vitest)
+        run: npm test
+
+      - name: Tests E2E (Playwright, chromium)
+        run: npm run test:e2e

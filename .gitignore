@@ -1,43 +1,59 @@
-# Dependencies
-node_modules/
-.pnp
-.pnp.js
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
-# Next.js
-.next/
-out/
-build/
-dist/
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
 
-# Prisma
-prisma/dev.db
-prisma/dev.db-journal
+# testing
+/coverage
+/playwright-report/
+/test-results/
+/blob-report/
+/playwright/.cache/
 
-# Testing
-coverage/
-playwright-report/
-test-results/
+# next.js
+/.next/
+/out/
 
-# Environment
+# uploads en runtime (fuera de public/ — fix de fotos E3, se sirven por /uploads/[...key])
+/.uploads/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (real values never committed; .env.example is committed on purpose)
 .env
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
+!.env.example
 
-# Logs
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
+# vercel
+.vercel
 
-# Editor / OS
-.vscode/*
-!.vscode/extensions.json
-.idea/
-.DS_Store
-*.swp
-
-# Misc
+# typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Prisma (Prisma 7): cliente generado (se regenera con `prisma generate`)
+/generated
+
+# opencode: configuración local de agentes/skills (no se publica en GitHub)
+.opencode/
