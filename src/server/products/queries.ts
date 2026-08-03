@@ -55,8 +55,9 @@ export function primaryCategory(
 }
 
 /**
- * Precio efectivo en USD (la oferta si existe y es menor) → para Bs y WhatsApp.
- * Mismo criterio en todos los renders (docs/architecture.md §3.3).
+ * Precio efectivo en USD (la oferta si existe y es menor) → para el precio en
+ * divisas y el mensaje de WhatsApp. Mismo criterio en todos los renders
+ * (docs/architecture.md §3.3).
  */
 export function effectivePriceUsd(product: {
   priceUsd: Prisma.Decimal;
@@ -66,9 +67,20 @@ export function effectivePriceUsd(product: {
   return offer && offer.lessThan(product.priceUsd) ? offer : product.priceUsd;
 }
 
+/**
+ * Equivalente en Bs de un producto: SIEMPRE sobre `priceUsd` (precio regular),
+ * NUNCA sobre la oferta — la oferta es un descuento SOLO por pago en divisas
+ * (USD); pagar en bolívares no aplica el descuento (docs/architecture.md §3.3).
+ */
+export function productPriceBs(
+  product: { priceUsd: Prisma.Decimal },
+  rate: Pick<BcvRate, "usdToBs"> | null,
+): Prisma.Decimal | null {
+  return rate ? usdToBs(product.priceUsd, rate.usdToBs) : null;
+}
+
 export function toCardProduct(product: CardProduct, rate: BcvRate | null): ProductCardProduct {
-  const effectiveUsd = effectivePriceUsd(product);
-  const priceBs = rate ? usdToBs(effectiveUsd, rate.usdToBs) : null;
+  const priceBs = productPriceBs(product, rate);
   const sellerName = product.business?.name ?? product.seller?.name;
 
   return {

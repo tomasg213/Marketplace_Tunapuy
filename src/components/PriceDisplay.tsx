@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 type PriceDisplayProps = {
   /** Precio efectivo en USD (la oferta si existe, si no el precio regular). */
   principal: Decimal.Value;
-  /** Equivalente en Bs calculado server-side; null si no hay tasa BCV. */
+  /** Equivalente en Bs del PRECIO REGULAR (la oferta es solo por pago en divisas), calculado server-side; null si no hay tasa BCV. */
   bs?: Decimal.Value | null;
   /** Precio original (antes de oferta). Se muestra tachado si el descuento es >= 10%. */
   oferta?: Decimal.Value | null;
@@ -35,7 +35,6 @@ export function PriceDisplay({
     showOffer ? original!.toNumber() : null,
     bsNumber,
   );
-
   const mainSize = variante === "card" ? "text-[20px]" : "text-2xl";
   const subSize = variante === "card" ? "text-[13px]" : "text-sm";
 
@@ -85,6 +84,8 @@ export function PriceDisplay({
 }
 
 function buildAriaLabel(principal: number, original: number | null, bs: number | null): string {
+  // Regla de negocio §3.3: el Bs es SIEMPRE el equivalente del PRECIO REGULAR
+  // (la oferta es un descuento solo por pago en divisas).
   const base =
     original !== null
       ? `Precio en oferta: ${spokenAmount(principal, "dólar")}. Precio anterior: ${spokenAmount(
@@ -93,7 +94,9 @@ function buildAriaLabel(principal: number, original: number | null, bs: number |
         )}.`
       : `Precio: ${spokenAmount(principal, "dólar")}.`;
   return bs !== null
-    ? `${base} Equivalente en bolívares: ${spokenAmount(bs, "bolívar")}.`
+    ? `${base} Equivalente en bolívares${
+        original !== null ? " (precio regular)" : ""
+      }: ${spokenAmount(bs, "bolívar")}.`
     : base;
 }
 

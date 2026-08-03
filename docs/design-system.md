@@ -52,7 +52,7 @@ Tokens de dominio (en `@theme inline` para utilidades propias):
 
 ## 4. Precios — jerarquía (componente `PriceDisplay`)
 
-**Regla de oro:** el Bs. es SIEMPRE el equivalente del **precio efectivo** (la oferta si existe), nunca del tachado. Bs. calculado **server-side**.
+**Regla de oro:** el Bs. es SIEMPRE el equivalente del **precio regular** (`priceUsd`), nunca del de oferta — la oferta es un descuento **solo por pago en divisas** (USD); pagar en bolívares no aplica el descuento. Bs. calculado **server-side** sobre `priceUsd`.
 
 Formato (utilidad `formatPrice` ya en `lib/format.ts`): USD `$25.00` (punto decimal, 2 dígitos); Bs. `Bs. 18.665,74` (miles con punto, decimal con coma).
 
@@ -62,14 +62,14 @@ $25.00          ← 20px, peso 700, price-primary
 Bs. 18.665,74   ← 13px, peso 500, price-secondary
 ```
 
-**Con oferta**:
+**Con oferta** (el Bs. usa el precio regular, no el de oferta):
 ```
 $22.00  [−12%]   ← 20px, peso 700, amber-700; badge pill ámbar junto a cifra (solo si descuento ≥10%)
 $25.00 (tachado) ← 13px, peso 400, stone-500
-Bs. 16.214,15    ← 13px, peso 500, muted-foreground
+Bs. 18.425,50    ← 13px, peso 500, muted-foreground  (25,00 × tasa, NO 22,00 × tasa)
 ```
 
-A11y: `aria-label` — sin oferta: "Precio: 22 dólares. Equivalente en bolívares: 16 mil 214 bolívares con 15 céntimos." Con oferta: "Precio en oferta: 22 dólares. Precio anterior: 25 dólares. …"
+A11y: `aria-label` — sin oferta: "Precio: 22 dólares. Equivalente en bolívares: 16 mil 214 bolívares con 15 céntimos." Con oferta: "Precio en oferta: 22 dólares. Precio anterior: 25 dólares. Equivalente en bolívares (precio regular): 18 mil 425 bolívares. …"
 
 ## 5. Componentes
 

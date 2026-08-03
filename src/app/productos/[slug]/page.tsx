@@ -22,8 +22,7 @@ import { cn } from "@/lib/utils";
 import { formatBs, formatUsd } from "@/lib/format";
 import { formatDateLong, formatRelativeTime } from "@/lib/time";
 import { db } from "@/server/db";
-import { detailIncludes, effectivePriceUsd } from "@/server/products/queries";
-import { usdToBs } from "@/server/rate/convert";
+import { detailIncludes, effectivePriceUsd, productPriceBs } from "@/server/products/queries";
 import { getBcvRate, type BcvRate } from "@/server/rate/rate.service";
 
 export const dynamic = "force-dynamic";
@@ -52,7 +51,8 @@ export default async function ProductDetailPage({ params }: { params: Params }) 
 
   const effectiveUsd = effectivePriceUsd(product);
   const hasOffer = product.offerPriceUsd !== null && product.offerPriceUsd.lessThan(product.priceUsd);
-  const priceBs = rate ? usdToBs(effectiveUsd, rate.usdToBs) : null;
+  // Bs SIEMPRE sobre el precio regular (la oferta es solo por pago en divisas).
+  const priceBs = productPriceBs(product, rate);
 
   const sellerName = product.business?.name ?? product.seller?.name;
   const sellerHref = product.business?.slug

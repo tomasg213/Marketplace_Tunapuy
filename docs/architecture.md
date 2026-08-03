@@ -442,11 +442,14 @@ Justificación:
 - La conversión **solo ocurre en el Server Component** de la página: el cliente recibe una
   cadena ya formateada (o el número + tasa si se decide por accesibilidad a11y, nunca el
   cómputo en el cliente).
-- `PriceDisplay` (componente, lo implementa `designer`) recibe `{ priceUsd, offerPriceUsd?, priceBs }`
-  ya calculados.
+- **Regla del Bs (decisión PM 2026-08-03):** el equivalente en Bs se calcula SIEMPRE sobre
+  `priceUsd` (precio regular), NUNCA sobre la oferta. La oferta (`offerPriceUsd`) es un
+  descuento **solo por pago en divisas** (USD); pagar en bolívares no aplica el descuento.
+  Regla centralizada en `productPriceBs()` (`src/server/products/queries.ts`), usada por
+  `toCardProduct` (tarjetas) y la ficha `/productos/[slug]`.
 - Precio de oferta: si `offerPriceUsd` existe y `offerPriceUsd < priceUsd`, se muestra como
-  precio vigente tachando el original (la lógica de "vigente" la decide el server con el
-  mismo criterio en todos los renders).
+  precio vigente en USD tachando el original (la lógica de "vigente" la decide el server con
+  el mismo criterio en todos los renders).
 
 ---
 
@@ -890,13 +893,28 @@ público detrás de proxy con `x-forwarded-for`) el rate limit por IP aplica com
 - `POST /api/uploads` acepta `folder=users|businesses` (avatar/logo) además del
   modo producto (`productId`); con `folder=businesses` exige `businessId` +
   ownership (`Business.ownerId`). Responde `{ url, key }` sin fila en BD.
-- `src/server/cuenta/actions.ts`: `updateUserProfileAction` (nombre, email
-  opcional, avatarUrl) y `updateBusinessAction` (nombre, descripción, teléfono,
-  logoUrl) — requireAuth, solo el negocio propio (`ownerId`), teléfono del
-  usuario SOLO LECTURA. Devuelven `{ ok } | { ok: false, error }`.
-- `assertUploadedImageUrl()` (`images/validate-upload-url.ts`): las acciones solo
-  aceptan URLs de **nuestro** storage (`/uploads/<folder>/` relativa o absoluta
-  same-origin, key segura) → nada de `javascript:`/`data:`/URLs externas (XSS).
+- **Capa de servicios** (refactor 2026-08-03): la lógica de negocio vive en
+  `src/server/business/service.ts` (`createBusiness`/`updateBusiness`, un negocio
+  por cuenta vía `ownerId @unique`, slug permalink estable que NO se regenera al
+  renombrar) y `src/server/users/profile-service.ts` (`updateUserProfile`).
+  Errores controlados con clases propias (`Business*Error`, `EmailConflictError`,
+  `UserProfileValidationError`, `ImagePolicyError`).
+- **Server actions (capa fina "use server")**: `src/server/cuenta/actions.ts`
+  expone `updateUserProfileAction` (nombre, email opcional, avatarUrl) y
+  `updateBusinessAction` (nombre, descripción, teléfono, logoUrl) — requireAuth,
+  solo el negocio propio (`ownerId`), teléfono del usuario SOLO LECTURA. Delegan
+  en los servicios y traducen errores a `{ ok } | { ok: false, error }`.
+  `src/server/business/actions.ts` solo expone `createBusiness`
+  (`{ ok: true; id; slug } | { ok: false; error }`).
+- **Política de imágenes (defensa en profundidad)**: `assertUploadedImageUrl()`
+  (`images/validate-upload-url.ts`) se aplica en el **servicio** (no solo en la
+  acción): solo URLs de **nuestro** storage (`/uploads/<folder>/` relativa o
+  absoluta same-origin, key segura) → nada de `javascript:`/`data:`/URLs externas
+  (XSS). Nota: zod `.url()` NO bloquea `javascript:`, por eso la validación vive
+  en el servicio. `undefined` = no tocar, `null` = limpiar imagen (sin error).
+- Semántica de imagen: `avatarUrl`/`logoUrl` nullish — `null` limpia la imagen en
+  BD (bug corregido en el refactor: antes `null` lanzaba error y bloqueaba
+  guardar perfiles sin imagen).
 - "use server" no puede exportar clases ni consts no-async (Turbopack): los
   errores de negocio se mantienen como clases no exportadas o se eliminan.
 
