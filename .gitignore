@@ -57,3 +57,4 @@ next-env.d.ts
 
 # opencode: configuración local de agentes/skills (no se publica en GitHub)
 .opencode/
+/opencode.json
