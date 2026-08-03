@@ -1,8 +1,35 @@
 # Roadmap — Marketplace_Tunapuy (épicas E0–E5)
 
 > Documento de planificación de épicas. Las épicas las desglosa y delega el `product-manager`.
-> Estado: E0 implementado (scaffold, Prisma/Postgres, tasa BCV, home y tests en verde —
-> 2026-08-02). Pendiente de commit por pasos y de las siguientes épicas.
+> Estado: E0 implementado. E1 en curso (auth OTP + publicaciones). E3 "Perfiles editables"
+> avanzado con refactor de capa de servicio + endurecimiento de seguridad (2026-08-03).
+> Pendiente de commit por pasos y de las siguientes épicas.
+
+---
+
+## Última sesión (2026-08-03) — Refactor capa de servicio + fix de caída
+
+**Incidente:** la web devolvía HTTP 500 en todas las rutas por colisión de nombres en
+`src/server/business/actions.ts` (`createBusiness` importado del servicio y declarado como
+server action → error de compilación Turbopack). Corregido con alias en las importaciones.
+
+**Refactor completado (perfiles editables, E3):**
+- Lógica de negocio extraída de las server actions a una capa de servicios:
+  `src/server/business/service.ts` (create/updateBusiness con errores propios) y
+  `src/server/users/profile-service.ts` (updateUserProfile).
+- `cuenta/actions.ts` quedó como capa fina "use server" (auth + traducción de errores).
+- Eliminado el `updateBusinessAction` duplicado; `business/actions.ts` solo expone `createBusiness`.
+- Bug corregido: `avatarUrl`/`logoUrl` con `null` (limpiar imagen) ya no lanzan error.
+- Defensa en profundidad (dictamen security): la política de imágenes
+  (`assertUploadedImageUrl`, solo `/uploads/<folder>/` de nuestro origen) se aplica ahora en
+  el servicio (`ImagePolicyError`), no solo en la acción. Bloques incluyen `javascript:`,
+  `data:` y URLs externas (zod `.url()` NO bloquea `javascript:` por sí solo).
+- Restaurado `.trim()` en el email; test flaky de `rate-limit.test.ts` estabilizado (windowMs 1000).
+- Cobertura: +19 tests de integración nuevos (business.service, profile-service, política de
+  imágenes). Suite total: 207 unit + 29 E2E en verde; tsc/lint/build limpios.
+
+**Verificaciones:** `npm run test` 207/207 · `npm run test:e2e` 29/29 · `tsc --noEmit` 0 ·
+`lint` 0 errores · home/buscar/login 200 · `/cuenta` 307 sin sesión.
 
 ---
 

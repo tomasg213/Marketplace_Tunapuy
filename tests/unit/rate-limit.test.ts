@@ -83,13 +83,16 @@ describe("assertRateLimit", () => {
   });
 
   it("renueva la ventana al vencer (misma key vuelve a permitir)", async () => {
+    // Ventana de 1s (antes 100ms): bajo carga la ventana vencía entre hits y
+    // el test fallaba ~1 de 2 corridas (flaky H4). La espera de 1.1s garantiza
+    // que la ventana expiró sin depender del jitter del scheduler.
     const key = "test:window";
-    await rl.assertRateLimit(key, { limit: 1, windowMs: 100 }); // 1º OK
-    await expect(rl.assertRateLimit(key, { limit: 1, windowMs: 100 })).rejects.toBeInstanceOf(
+    await rl.assertRateLimit(key, { limit: 1, windowMs: 1_000 }); // 1º OK
+    await expect(rl.assertRateLimit(key, { limit: 1, windowMs: 1_000 })).rejects.toBeInstanceOf(
       RateLimitErrorClass,
     );
-    await new Promise((resolve) => setTimeout(resolve, 120));
-    await expect(rl.assertRateLimit(key, { limit: 1, windowMs: 100 })).resolves.toBeUndefined();
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+    await expect(rl.assertRateLimit(key, { limit: 1, windowMs: 1_000 })).resolves.toBeUndefined();
   });
 
   it("mantiene buckets independientes por key", async () => {
