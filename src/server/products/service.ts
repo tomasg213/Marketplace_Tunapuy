@@ -24,6 +24,11 @@ import {
 } from "@/server/products/validators";
 import { z } from "zod";
 
+// BusinessOwnershipError vive en business/service.ts (fuente única); se
+// re-exporta aquí por compatibilidad (actions y route handlers lo importan).
+export { BusinessOwnershipError } from "@/server/business/service";
+import { BusinessOwnershipError } from "@/server/business/service";
+
 // ---------------------------------------------------------------------------
 // Errores controlados
 // ---------------------------------------------------------------------------
@@ -46,13 +51,6 @@ export class ProductValidationError extends Error {
   constructor(message: string, public readonly issues?: z.ZodIssue[]) {
     super(message);
     this.name = "ProductValidationError";
-  }
-}
-
-export class BusinessOwnershipError extends Error {
-  constructor(message = "No eres dueño de este negocio") {
-    super(message);
-    this.name = "BusinessOwnershipError";
   }
 }
 
