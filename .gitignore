@@ -54,3 +54,6 @@ next-env.d.ts
 
 # Prisma (Prisma 7): cliente generado (se regenera con `prisma generate`)
 /generated
+
+# opencode: configuración local de agentes/skills (no se publica en GitHub)
+.opencode/
