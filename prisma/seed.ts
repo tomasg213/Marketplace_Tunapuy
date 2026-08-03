@@ -485,6 +485,16 @@ async function seedMock(): Promise<void> {
       : p.sellerPhone;
     if (!sellerId) throw new Error(`Seller no encontrado para ${p.slug}`);
 
+    // Imagen ilustrativa de demo: assets locales en public/images/seed/<slug>.jpg
+    // (fotos CC/Unsplash — ver README). Mismo nombre de archivo que el slug.
+    const imageUrl = `/images/seed/${p.slug}.jpg`;
+    const seedImage = {
+      url: imageUrl,
+      key: `seed/${p.slug}/main`,
+      alt: p.title,
+      position: 0,
+    };
+
     // Mismo patrón que `images`: en create se conectan las categorías y en
     // update se reemplazan (deleteMany + create) para reflejar categorySlugs.
     const categories = {
@@ -516,21 +526,14 @@ async function seedMock(): Promise<void> {
           category: { connect: { slug } },
           position,
         })) },
+        // Reemplaza la imagen del seed (idempotente): refleja el asset local.
+        images: { deleteMany: {}, create: [seedImage] },
       },
       create: {
         ...base,
         publishedAt: p.publishedHoursAgo === null ? null : hoursAgo(p.publishedHoursAgo),
         categories,
-        images: {
-          create: [
-            {
-              url: "/placeholder.svg",
-              key: `seed/${p.slug}/main`,
-              alt: p.title,
-              position: 0,
-            },
-          ],
-        },
+        images: { create: [seedImage] },
       },
     });
   }

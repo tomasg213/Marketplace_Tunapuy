@@ -8,6 +8,25 @@ PostgreSQL). Documentación relevante:
 - `docs/architecture.md` — arquitectura técnica (modelo de datos, tasa BCV, auth OTP, mock vs real).
 - `docs/deployment.md` — CI/CD, estrategia por rama, hosting y mapa de variables por entorno.
 - `docs/monitoring.md` — observabilidad mínima (health, logs, alertas de la tasa BCV).
+- `docs/roadmap.md` — épicas E0–E5 y estado del backlog.
+
+## Datos de demostración (DATA_MODE=mock)
+
+El seed (`prisma/seed.ts`) crea 10 vendedores, 10 negocios y 17 productos ficticios
+con imágenes ilustrativas locales en `public/images/seed/` (una por producto,
+misma URL que el slug). Las imágenes provienen de:
+
+- **Unsplash** (licencia Unsplash — uso libre, sin atribución obligatoria): jeans,
+  perfumes, ron/whisky, vino.
+- **Flickr CC** (vía Openverse, licencias `by` / `by-sa`): arepa, empanadas, camisa,
+  zapatillas, sandalias, bujías, aire acondicionado, anillos, mesa de madera, taladro.
+- **Wikimedia Commons** (licencias `by-sa`): aceite de motor, limpiaparabrisas.
+
+Re-ejecuta el seed para regenerar los datos demo (idempotente):
+
+```bash
+npm run db:seed
+```
 
 ## Getting Started
 
